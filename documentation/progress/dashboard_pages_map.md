@@ -6,7 +6,7 @@ This document maps the existing HTML prototypes in the `dashboards/` directory a
 
 | Category | Page Name | Status | Existing Path / Notes | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **Core** | **Landing Page** | 🔴 Missing | - | Public-facing home page (Marketing + Login). |
+| **Core** | **Landing Page** | 🟢 Completed (2025-11-23) | `octavia-web/app/page.tsx` | Public-facing home page (Marketing + Login). |
 | **Core** | **Hub / Dashboard** | 🟢 Existing | `dashboards/hub/ai_suite_hub.html` | Central hub to select tools (Video, Audio, Subtitles). |
 | **Auth** | **Login / Sign Up** | 🔴 Missing | (Handled by Clerk) | Authentication pages (or Clerk components). |
 | **Video** | **Video Translator Input** | 🟢 Existing | `dashboards/video-translation/video_ai_translator.html` | Upload video, select languages. |
