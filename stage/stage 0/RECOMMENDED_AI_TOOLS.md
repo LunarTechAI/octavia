@@ -1,8 +1,18 @@
 # Recommended AI Tools for Octavia Development
 
+## Context: Where Octavia Stands Today
+
+**Good news: the foundation is built.** Octavia's frontend is complete—24 beautiful dashboard pages, a polished Liquid Glass design system, and a thoroughly researched architecture. The translation pipeline has been planned, the best tools selected (WhisperX, Coqui TTS, FFmpeg, Ollama), and the quality benchmarks defined.
+
+**What's next? Integration.** The remaining work is focused on connecting these carefully selected modules to the stunning interface that's already waiting. This isn't about reinventing the wheel—it's about bringing the pieces together efficiently and reliably.
+
+**These AI tools are your integration accelerators.** With the planning done and the architecture clear, the right AI assistants can help you rapidly implement backend connections, debug integration issues, and test the translation pipeline against our quality benchmarks. Think of them as force multipliers for the final sprint to launch.
+
+---
+
 ## Essential AI Development Tools
 
-To successfully complete the Octavia project, the following AI tools are highly recommended. Each tool serves a specific purpose in accelerating development, debugging, and ensuring high-quality output.
+The following AI tools are highly recommended to accelerate the integration phase. Each tool serves a specific purpose in connecting Octavia's modules, debugging complex interactions, and ensuring production-ready quality.
 
 ---
 
@@ -31,7 +41,7 @@ Antigravity can autonomously handle complex, multi-step development tasks that w
 
 ---
 
-## 2. Claude Code (Sonnet 3.7)
+## 2. Claude Code (Sonnet 4.5)
 
 **Purpose**: Advanced code understanding and generation with superior reasoning
 
