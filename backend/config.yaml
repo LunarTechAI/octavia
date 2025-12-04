@@ -1,0 +1,167 @@
+# Octavia Video Translator Configuration
+
+
+models:
+  whisper:
+    model_size: "large"  # Use large for multilingual support
+    language: "auto"  # Auto-detect language
+    task: "transcribe"
+    temperature: 0.0
+    best_of: 5
+    beam_size: 5
+    word_timestamps: true
+  
+  translation:
+    # Russian to English model
+    ru_en_model: "Helsinki-NLP/opus-mt-ru-en"
+    # English to German model
+    en_de_model: "Helsinki-NLP/opus-mt-en-de"
+    # English to Russian model
+    en_ru_model: "Helsinki-NLP/opus-mt-en-ru"
+    # German to English model
+    de_en_model: "Helsinki-NLP/opus-mt-de-en"
+    # English to Spanish (fallback)
+    en_es_model: "Helsinki-NLP/opus-mt-en-es"
+    
+    max_length: 512
+    temperature: 0.7
+    repetition_penalty: 1.2
+  
+  tts:
+    # Edge-TTS voices for better multilingual support
+    english_voice: "en-US-JennyNeural"
+    german_voice: "de-DE-KatjaNeural"
+    russian_voice: "ru-RU-SvetlanaNeural"
+    spanish_voice: "es-ES-ElviraNeural"
+    french_voice: "fr-FR-DeniseNeural"
+
+processing:
+  # Chunking parameters
+  default_chunk_size: 30  # seconds
+  max_chunk_size: 120  # seconds
+  min_chunk_size: 10  # seconds
+  
+  # Speech density detection
+  min_speech_ratio: 0.3  # Minimum speech ratio to consider chunk valid
+  max_silence_ms: 2000  # Maximum silence between words
+  
+  # Timing constraints (from technical assessment)
+  max_duration_diff_ms: 200  # ±200ms tolerance per segment
+  max_condensation_ratio: 1.2  # ≤1.2× original segment length
+  min_condensation_ratio: 0.7  # Don't condense too much
+  
+  # Language support
+  supported_languages:
+    source: ["en", "ru", "de", "es", "fr"]
+    target: ["en", "ru", "de", "es", "fr"]
+  
+  # Translation pairs
+  translation_pairs:
+    ru_en:
+      source: "ru"
+      target: "en"
+      model: "Helsinki-NLP/opus-mt-ru-en"
+      tts_voice: "en-US-JennyNeural"
+    en_de:
+      source: "en"
+      target: "de"
+      model: "Helsinki-NLP/opus-mt-en-de"
+      tts_voice: "de-DE-KatjaNeural"
+    en_ru:
+      source: "en"
+      target: "ru"
+      model: "Helsinki-NLP/opus-mt-en-ru"
+      tts_voice: "ru-RU-SvetlanaNeural"
+    de_en:
+      source: "de"
+      target: "en"
+      model: "Helsinki-NLP/opus-mt-de-en"
+      tts_voice: "en-US-JennyNeural"
+  
+  # Audio processing
+  target_lufs: -16.0  # Broadcast standard
+  max_true_peak_db: -1.0  # Prevent clipping
+  normalize_audio: true
+  apply_compression: true
+  compression_threshold: -20.0
+  compression_ratio: 4.0
+  
+  # Parallel processing
+  max_workers: 2  # Reduced for stability
+  batch_size: 1
+  use_gpu: false  # Set to true if you have GPU
+  
+  # Error handling
+  max_retries: 2
+  retry_delay_seconds: 1
+  continue_on_error: false
+
+hardware:
+  device_priority: ["cpu"]  # Use CPU for compatibility
+  cpu_threads: 2  # Reduced for stability
+  enable_memory_mapping: true
+  
+  # Resource limits
+  max_temp_files_gb: 10
+  max_ram_usage_gb: 4
+  checkpoint_interval_chunks: 10
+
+logging:
+  # Output configuration
+  output_dir: "artifacts"
+  log_file: "logs.jsonl"
+  metrics_file: "metrics_summary.json"
+  preview_file: "preview.mp4"
+  
+  # Logging levels
+  console_level: "INFO"
+  file_level: "DEBUG"
+  
+  # What to log
+  log_hardware_info: true
+  log_audio_metrics: true
+  log_timing_metrics: true
+  log_condensation_events: true
+  log_error_details: true
+  
+  # Retention
+  keep_temp_files: false
+  max_log_files: 5
+
+paths:
+  temp_dir: "temp"
+  models_dir: "models"
+  output_dir: "outputs"
+  
+  # Checkpointing
+  checkpoint_dir: "checkpoints"
+  auto_save_checkpoints: true
+  checkpoint_frequency_minutes: 5
+
+testing:
+  # Integration test configuration
+  test_video_path: "test_samples/sample_30s.mp4"
+  test_audio_path: "test_samples/sample_30s.wav"
+  expected_duration_tolerance_ms: 100
+  min_success_rate: 0.8
+  
+  # Validation
+  validate_output: true
+  checksum_output: true
+  verify_duration_match: true
+  spot_check_count: 3  # Reduced for faster testing
+
+features:
+  # Feature flags
+  enable_ai_orchestrator: false  # Disable for simplicity
+  enable_real_time_preview: true
+  enable_batch_processing: false  # Disable for stability
+  enable_subtitle_generation: true
+  enable_voice_cloning: false
+  enable_multi_speaker: false
+  
+  # Quality enhancements
+  enable_noise_reduction: true
+  enable_audio_enhancement: true
+  enable_lip_sync_estimation: false  # Disable for now
+  enable_prosody_control: true

@@ -1,5 +1,5 @@
 // API service for handling all backend communication
-// Manages authentication, video translation, and user operations
+// Manages authentication, video translation, subtitle generation, and user operations
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Standard response format from all API endpoints
@@ -14,6 +14,15 @@ interface ApiResponse<T = any> {
   download_url?: string;
   remaining_credits?: number;
   requires_verification?: boolean;
+  status?: string;
+  progress?: number;
+  content?: string;
+  segments?: SubtitleSegment[];
+  language?: string;
+  format?: string;
+  segment_count?: number;
+  created_at?: string;
+  completed_at?: string;
 }
 
 interface User {
@@ -74,6 +83,46 @@ interface Transaction {
   package_id?: string;
 }
 
+// Subtitle job interface
+interface SubtitleJobResponse {
+  job_id: string;
+  download_url?: string;
+  format?: string;
+  segment_count?: number;
+  language?: string;
+  success?: boolean;
+  message?: string;
+}
+
+// Subtitle segment interface
+interface SubtitleSegment {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  confidence?: number;
+  words?: Array<{
+    word: string;
+    start: number;
+    end: number;
+    confidence: number;
+  }>;
+}
+
+// Subtitle review data-
+interface SubtitleReviewData {
+  job_id: string;
+  status: string;
+  format: string;
+  language: string;
+  segment_count: number;
+  content: string;
+  download_url: string;
+  created_at: string;
+  completed_at?: string;
+  segments?: SubtitleSegment[];
+}
+
 class ApiService {
   // Get authentication token from localStorage
   private getToken(): string | null {
@@ -90,6 +139,22 @@ class ApiService {
       }
     }
     return null;
+  }
+
+  // Update user token in localStorage
+  private updateUserToken(token: string): void {
+    if (typeof window === 'undefined') return;
+    
+    const userStr = localStorage.getItem('octavia_user');
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        user.token = token;
+        localStorage.setItem('octavia_user', JSON.stringify(user));
+      } catch (error) {
+        console.error('Failed to update token:', error);
+      }
+    }
   }
 
   // Core request handler for all API calls
@@ -161,7 +226,12 @@ class ApiService {
           errorMessage = `HTTP ${response.status}: ${response.statusText}`;
         }
         
-        throw new Error(errorMessage);
+        // FIXED: Return the error response instead of throwing
+        return {
+          success: false,
+          error: errorMessage,
+          status: response.status.toString(),
+        };
       }
 
       // Parse successful response
@@ -173,7 +243,10 @@ class ApiService {
           data = JSON.parse(responseText);
         } catch (parseError) {
           console.error('Server returned invalid JSON:', parseError);
-          throw new Error('Server returned an invalid response format');
+          return {
+            success: false,
+            error: 'Server returned an invalid response format',
+          };
         }
       }
       
@@ -190,7 +263,7 @@ class ApiService {
   // --- AUTHENTICATION ENDPOINTS ---
 
   // Register a new user account
-  async signup(email: string, password: string, name: string) {
+  async signup(email: string, password: string, name: string): Promise<ApiResponse> {
     const body = JSON.stringify({
       email: email,
       password: password,
@@ -204,7 +277,7 @@ class ApiService {
   }
 
   // Login existing user and receive authentication token
-  async login(email: string, password: string) {
+  async login(email: string, password: string): Promise<ApiResponse> {
     const body = JSON.stringify({
       email: email,
       password: password
@@ -217,7 +290,7 @@ class ApiService {
   }
 
   // Logout user and invalidate session
-  async logout() {
+  async logout(): Promise<ApiResponse> {
     const token = this.getToken();
     
     const response = await this.request('/api/auth/logout', {
@@ -239,7 +312,7 @@ class ApiService {
   // --- EMAIL VERIFICATION ---
 
   // Verify email address using token from verification email
-  async verifyEmail(token: string) {
+  async verifyEmail(token: string): Promise<ApiResponse> {
     const formData = new FormData();
     formData.append('token', token);
 
@@ -250,7 +323,7 @@ class ApiService {
   }
 
   // Resend verification email to user
-  async resendVerification(email: string) {
+  async resendVerification(email: string): Promise<ApiResponse> {
     const body = JSON.stringify({
       email: email
     });
@@ -264,10 +337,8 @@ class ApiService {
   // --- PAYMENT & CREDITS ---
 
   // Get available credit packages
-  async getCreditPackages() {
-    return this.request<{
-      packages: CreditPackage[];
-    }>('/api/payments/packages', {
+  async getCreditPackages(): Promise<ApiResponse<{ packages: CreditPackage[] }>> {
+    return this.request<{ packages: CreditPackage[] }>('/api/payments/packages', {
       method: 'GET',
     });
   }
@@ -317,15 +388,12 @@ class ApiService {
   }
 
   // Add test credits (for development/testing without payment)
-  async addTestCredits(credits: number) {
+  async addTestCredits(credits: number): Promise<ApiResponse<{ new_balance: number; credits_added: number }>> {
     const body = JSON.stringify({
       credits: credits
     });
 
-    return this.request<{
-      new_balance: number;
-      credits_added: number;
-    }>('/api/payments/add-test-credits', {
+    return this.request<{ new_balance: number; credits_added: number }>('/api/payments/add-test-credits', {
       method: 'POST',
       body: body,
     }, true);
@@ -357,7 +425,7 @@ class ApiService {
     file: File,
     targetLanguage: string = 'es',
     userEmail: string
-  ) {
+  ): Promise<ApiResponse> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('target_language', targetLanguage);
@@ -369,7 +437,16 @@ class ApiService {
   }
 
   // Check status of a translation job
-  async getJobStatus(jobId: string) {
+  async getJobStatus(jobId: string): Promise<ApiResponse<{
+    job_id: string;
+    status: string;
+    progress: number;
+    status_message?: string;
+    download_url?: string;
+    original_filename?: string;
+    target_language?: string;
+    error?: string;
+  }>> {
     return this.request<{
       job_id: string;
       status: string;
@@ -381,6 +458,183 @@ class ApiService {
       error?: string;
     }>(`/api/jobs/${jobId}/status`, {
       method: 'GET',
+    }, true);
+  }
+
+  // --- SUBTITLE GENERATION ---
+
+  // Generate subtitles from video/audio file
+  async generateSubtitles(
+    file: File,
+    format: string = 'srt',
+    userEmail: string,
+    language: string = 'auto'
+  ): Promise<ApiResponse<SubtitleJobResponse>> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('format', format);
+    formData.append('language', language);
+    
+    return this.request<SubtitleJobResponse>('/api/translate/subtitles', {
+      method: 'POST',
+      body: formData,
+    }, true);
+  }
+
+  // Get subtitle job status
+  async getSubtitleJobStatus(jobId: string): Promise<ApiResponse<{
+    job_id: string;
+    status: string;
+    progress: number;
+    download_url?: string;
+    format?: string;
+    segment_count?: number;
+    language?: string;
+    error?: string;
+  }>> {
+    return this.request<{
+      job_id: string;
+      status: string;
+      progress: number;
+      download_url?: string;
+      format?: string;
+      segment_count?: number;
+      language?: string;
+      error?: string;
+    }>(`/api/translate/subtitles/status/${jobId}`, {
+      method: 'GET',
+    }, true);
+  }
+
+  // Poll subtitle generation status
+  async pollSubtitleStatus(
+    jobId: string, 
+    interval: number = 2000, 
+    maxAttempts: number = 60
+  ): Promise<ApiResponse> {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await this.getSubtitleJobStatus(jobId);
+        
+        if (response.success && (response.status === 'completed' || response.status === 'failed')) {
+          return response;
+        }
+        
+        // Wait before next attempt
+        await new Promise(resolve => setTimeout(resolve, interval));
+      } catch (error) {
+        console.error('Error polling subtitle status:', error);
+      }
+    }
+    
+    return {
+      success: false,
+      error: 'Timeout waiting for subtitle generation',
+    };
+  }
+
+  // Download subtitle file
+  async downloadSubtitleFile(jobId: string, format: string = 'srt'): Promise<Blob> {
+    const token = this.getToken();
+    const url = `${API_BASE_URL}/api/download/subtitles/${jobId}`;
+    
+    const response = await fetch(url, {
+      headers: token ? {
+        'Authorization': `Bearer ${token}`
+      } : {},
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Download failed: ${response.statusText}`);
+    }
+    
+    return await response.blob();
+  }
+
+  // Get subtitle review data (for the review page) - FIXED
+  async getSubtitleReviewData(jobId: string): Promise<ApiResponse> {
+    const response = await this.request(`/api/translate/subtitles/review/${jobId}`, {
+      method: 'GET',
+    }, true);
+    
+    // If we have SRT content, parse it into segments
+    if (response.success && response.content) {
+      const segments = this.parseSRTContent(response.content);
+      return {
+        ...response,
+        segments: segments
+      };
+    }
+    
+    return response;
+  }
+
+  // Update subtitle text (edit functionality)
+  async updateSubtitleSegment(
+    jobId: string,
+    segmentId: number,
+    text: string
+  ): Promise<ApiResponse> {
+    const body = JSON.stringify({
+      segment_id: segmentId,
+      text: text
+    });
+
+    return this.request(`/api/translate/subtitles/${jobId}/segment`, {
+      method: 'PUT',
+      body: body,
+    }, true);
+  }
+
+  // Export subtitles in different formats
+  async exportSubtitles(
+    jobId: string,
+    format: string
+  ): Promise<ApiResponse<{ download_url: string }>> {
+    const body = JSON.stringify({
+      format: format
+    });
+
+    return this.request<{ download_url: string }>(`/api/translate/subtitles/${jobId}/export`, {
+      method: 'POST',
+      body: body,
+    }, true);
+  }
+
+  // --- AUDIO TRANSLATION ---
+
+  // Translate audio file
+  async translateAudio(
+    file: File,
+    targetLanguage: string = 'es',
+    userEmail: string
+  ): Promise<ApiResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('target_lang', targetLanguage);
+    
+    return this.request('/api/translate/audio', {
+      method: 'POST',
+      body: formData,
+    }, true);
+  }
+
+  // Enhanced video translation
+  async translateVideoEnhanced(
+    file: File,
+    targetLanguage: string = 'es',
+    userEmail: string,
+    chunkSize: number = 30
+  ): Promise<ApiResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('target_language', targetLanguage);
+    formData.append('chunk_size', chunkSize.toString());
+    
+    return this.request('/api/translate/video/enhanced', {
+      method: 'POST',
+      body: formData,
     }, true);
   }
 
@@ -421,27 +675,52 @@ class ApiService {
     return await response.blob();
   }
 
+  // Download any file by URL
+  async downloadFileByUrl(url: string, filename: string): Promise<void> {
+    const token = this.getToken();
+    
+    const response = await fetch(url, {
+      headers: token ? {
+        'Authorization': `Bearer ${token}`
+      } : {},
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.statusText}`);
+    }
+    
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(downloadUrl);
+  }
+
   // --- SYSTEM HEALTH ---
 
   // Check if backend API is reachable
-  async healthCheck() {
+  async healthCheck(): Promise<ApiResponse> {
     return this.request('/api/health');
   }
 
   // Login with demo/test account
-  async demoLogin() {
+  async demoLogin(): Promise<ApiResponse> {
     return this.request('/api/auth/demo-login', {
       method: 'POST',
     });
   }
 
   // Test basic API connectivity
-  async testConnection() {
+  async testConnection(): Promise<ApiResponse> {
     return this.request('/');
   }
 
   // Direct signup test (bypasses request wrapper for debugging)
-  async testSignupDirect(email: string, password: string, name: string) {
+  async testSignupDirect(email: string, password: string, name: string): Promise<any> {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
         method: 'POST',
@@ -478,7 +757,7 @@ class ApiService {
   // --- HELPER METHODS ---
 
   // Store payment session for later polling
-  storePaymentSession(sessionId: string, transactionId: string, packageId: string) {
+  storePaymentSession(sessionId: string, transactionId: string, packageId: string): void {
     if (typeof window === 'undefined') return;
     
     const paymentData = {
@@ -492,7 +771,12 @@ class ApiService {
   }
 
   // Get stored payment session
-  getStoredPaymentSession() {
+  getStoredPaymentSession(): { 
+    session_id: string; 
+    transaction_id: string; 
+    package_id: string; 
+    timestamp: number 
+  } | null {
     if (typeof window === 'undefined') return null;
     
     const paymentData = localStorage.getItem('last_payment_session');
@@ -517,7 +801,7 @@ class ApiService {
   }
 
   // Clear stored payment session
-  clearStoredPaymentSession() {
+  clearStoredPaymentSession(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem('last_payment_session');
   }
@@ -540,6 +824,146 @@ class ApiService {
     
     return { success: false, sessionId: null };
   }
+
+  // Store subtitle job data
+  storeSubtitleJob(jobId: string, data: any): void {
+    if (typeof window === 'undefined') return;
+    
+    const jobData = {
+      job_id: jobId,
+      ...data,
+      timestamp: Date.now()
+    };
+    
+    localStorage.setItem(`subtitle_job_${jobId}`, JSON.stringify(jobData));
+  }
+
+  // Get stored subtitle job data
+  getStoredSubtitleJob(jobId: string): any {
+    if (typeof window === 'undefined') return null;
+    
+    const jobData = localStorage.getItem(`subtitle_job_${jobId}`);
+    if (!jobData) return null;
+    
+    try {
+      return JSON.parse(jobData);
+    } catch (error) {
+      console.error('Failed to parse stored subtitle job:', error);
+      localStorage.removeItem(`subtitle_job_${jobId}`);
+      return null;
+    }
+  }
+
+  // Clear stored subtitle job data
+  clearStoredSubtitleJob(jobId: string): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(`subtitle_job_${jobId}`);
+  }
+
+  // Format SRT timestamp
+  formatSRTTimestamp(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const milliseconds = Math.floor((seconds - Math.floor(seconds)) * 1000);
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
+  }
+
+  // Parse SRT content
+  parseSRTContent(srtText: string): SubtitleSegment[] {
+    const segments: SubtitleSegment[] = [];
+    const lines = srtText.split('\n');
+    
+    let currentSegment: Partial<SubtitleSegment> = {};
+    let textBuffer: string[] = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      if (!line) {
+        // Empty line indicates end of segment
+        if (currentSegment.id && textBuffer.length > 0) {
+          segments.push({
+            id: currentSegment.id!,
+            start: currentSegment.start!,
+            end: currentSegment.end!,
+            text: textBuffer.join(' ').trim()
+          });
+        }
+        currentSegment = {};
+        textBuffer = [];
+        continue;
+      }
+      
+      if (!currentSegment.id && /^\d+$/.test(line)) {
+        // Segment number
+        currentSegment.id = parseInt(line, 10);
+      } else if (currentSegment.id && !currentSegment.start && line.includes('-->')) {
+        // Timestamp line
+        const [startStr, endStr] = line.split('-->').map(s => s.trim());
+        currentSegment.start = this.parseSRTTimestamp(startStr);
+        currentSegment.end = this.parseSRTTimestamp(endStr);
+      } else if (currentSegment.id && currentSegment.start) {
+        // Text line
+        textBuffer.push(line);
+      }
+    }
+    
+    // Add last segment if exists
+    if (currentSegment.id && textBuffer.length > 0) {
+      segments.push({
+        id: currentSegment.id!,
+        start: currentSegment.start!,
+        end: currentSegment.end!,
+        text: textBuffer.join(' ').trim()
+      });
+    }
+    
+    return segments;
+  }
+
+  // Parse SRT timestamp to seconds
+  private parseSRTTimestamp(timestamp: string): number {
+    const [time, milliseconds] = timestamp.split(',');
+    const [hours, minutes, seconds] = time.split(':').map(Number);
+    const ms = milliseconds ? parseInt(milliseconds, 10) / 1000 : 0;
+    
+    return hours * 3600 + minutes * 60 + seconds + ms;
+  }
+
+  // Generate dummy subtitle data for testing
+  generateDummySubtitles(count: number = 10): SubtitleSegment[] {
+    const segments: SubtitleSegment[] = [];
+    let currentTime = 0;
+    
+    for (let i = 1; i <= count; i++) {
+      const duration = 3 + Math.random() * 4; // 3-7 seconds per segment
+      const segment: SubtitleSegment = {
+        id: i,
+        start: currentTime,
+        end: currentTime + duration,
+        text: `This is dummy subtitle text for segment ${i}. It simulates generated speech recognition output.`,
+        confidence: 0.8 + Math.random() * 0.2 // 80-100% confidence
+      };
+      
+      segments.push(segment);
+      currentTime += duration + 0.5; // Add small gap between segments
+    }
+    
+    return segments;
+  }
 }
 
 export const api = new ApiService();
+export type {
+  ApiResponse,
+  User,
+  CreditPackage,
+  PaymentSessionResponse,
+  PaymentStatusResponse,
+  Transaction,
+  SubtitleJobResponse,
+  SubtitleSegment,
+  SubtitleReviewData
+};

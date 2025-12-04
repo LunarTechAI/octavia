@@ -8,3 +8,8 @@ torchaudio
 ffmpeg-python
 coqui-tts
 pydub
+edge-tts
+torchaudio
+faster-whisper
+transformers[sentencepiece]
+webvtt-py
