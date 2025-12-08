@@ -207,7 +207,11 @@ export default function AudioTranslationPage() {
       console.log('Target language:', targetLanguage);
       
       // Use the API service to translate audio
-      const response = await api.translateAudio(selectedFile, targetLanguage);
+      const response = await api.translateAudio({
+        file: selectedFile,
+        sourceLanguage,
+        targetLanguage
+      });
       
       console.log('API Response:', response);
 

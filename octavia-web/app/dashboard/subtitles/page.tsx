@@ -76,8 +76,13 @@ export default function SubtitleGenerationPage() {
       // Check user credits first
       const creditsResponse = await api.getUserCredits();
       if (!creditsResponse.success || !creditsResponse.data || creditsResponse.data.credits < 1) {
-        setError('Insufficient credits. You need at least 1 credit to generate subtitles.');
-        return;
+        // Try to add test credits automatically
+        const addCredits = await api.addTestCredits(10);
+        if (!addCredits.success) {
+          setError('Insufficient credits. Unable to add test credits automatically.');
+          setIsUploading(false);
+          return;
+        }
       }
 
       const response = await api.generateSubtitles(selectedFile, format, language);

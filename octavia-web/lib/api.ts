@@ -858,15 +858,20 @@ async translateSubtitleFile(
 
   // Translate audio file
   async translateAudio(
-    file: File,
-    targetLanguage: string = 'es'
-  ): Promise<ApiResponse> {
+    data: TranslationRequest
+  ): Promise<ApiResponse<{ job_id: string; status_url: string; remaining_credits: number }>> {
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('source_lang', 'en');
-    formData.append('target_lang', targetLanguage);
+    formData.append('file', data.file);
+    formData.append('source_lang', data.sourceLanguage);
+    formData.append('target_lang', data.targetLanguage);
 
-    return this.request('/api/translate/audio', {
+    console.log('DEBUG: Audio translation request:', {
+      file: data.file.name,
+      sourceLanguage: data.sourceLanguage,
+      targetLanguage: data.targetLanguage
+    });
+
+    return this.request<{ job_id: string; status_url: string; remaining_credits: number }>('/api/translate/audio', {
       method: 'POST',
       body: formData,
     }, true);
