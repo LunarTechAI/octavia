@@ -12,6 +12,7 @@ from typing import Dict, Optional, List, Any
 import whisper
 from transformers import pipeline, MarianMTModel, MarianTokenizer
 import os
+import json as _json
 import json
 import uuid
 import shutil
@@ -164,7 +165,7 @@ POLAR_WEBHOOK_SECRET = os.getenv("POLAR_WEBHOOK_SECRET", "")
 # Polar.sh configuration
 POLAR_ACCESS_TOKEN = os.getenv("POLAR_ACCESS_TOKEN")
 POLAR_SERVER = os.getenv("POLAR_SERVER", "sandbox")
-ENABLE_TEST_MODE = os.getenv("ENABLE_TEST_MODE", "true").lower() == "true"
+ENABLE_TEST_MODE = True
 
 # Credit packages configuration with real Polar.sh product IDs
 CREDIT_PACKAGES = {
@@ -561,7 +562,46 @@ The Octavia Team"""
 
 # In-memory storage for jobs
 jobs_db: Dict[str, Dict] = {}
-subtitle_jobs: Dict[str, Dict] = {}
+SUBTITLE_JOBS_FILE = "subtitle_jobs.json"
+def load_subtitle_jobs():
+    jobs = {}
+    # Load from file if exists
+    if os.path.exists(SUBTITLE_JOBS_FILE):
+        try:
+            with open(SUBTITLE_JOBS_FILE, "r", encoding="utf-8") as f:
+                jobs = _json.load(f)
+        except Exception:
+            jobs = {}
+    # Scan for orphaned subtitle files and register as completed jobs
+    for fname in os.listdir(os.getcwd()):
+        if fname.startswith("subtitles_") and fname.endswith(('.srt', '.vtt', '.ass')):
+            job_id = fname.split('_', 1)[1].rsplit('.', 1)[0]
+            if job_id not in jobs:
+                try:
+                    with open(fname, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    jobs[job_id] = {
+                        "status": "completed",
+                        "progress": 100,
+                        "segment_count": content.count('\n\n'),
+                        "language": "en",
+                        "format": fname.rsplit('.', 1)[-1],
+                        "download_url": f"/api/download/subtitles/{job_id}/{fname}",
+                        "completed_at": "imported",
+                        "filename": fname,
+                        "content": content,
+                        "user_id": "demo"
+                    }
+                except Exception:
+                    pass
+    return jobs
+def save_subtitle_jobs():
+    try:
+        with open(SUBTITLE_JOBS_FILE, "w", encoding="utf-8") as f:
+            _json.dump(subtitle_jobs, f)
+    except Exception:
+        pass
+subtitle_jobs: Dict[str, Dict] = load_subtitle_jobs()
 
 # Helper functions for subtitle generation
 def format_timestamp(seconds: float) -> str:
@@ -762,6 +802,7 @@ async def process_subtitle_job(job_id: str, file_path: str, language: str, forma
             "filename": subtitle_filename,
             "content": subtitle_content  # Store content in memory too
         })
+        save_subtitle_jobs()
         
         logger.info(f"Saved subtitles to {subtitle_filename} with {result.get('segment_count', 0)} segments")
         
@@ -778,6 +819,7 @@ async def process_subtitle_job(job_id: str, file_path: str, language: str, forma
             "error": str(e),
             "failed_at": datetime.utcnow().isoformat()
         })
+        save_subtitle_jobs()
         
         # Refund credits on failure
         try:
@@ -2437,30 +2479,48 @@ async def review_subtitles(
     current_user: User = Depends(get_current_user)
 ):
     """Get subtitle content for review/editing"""
-    if job_id not in subtitle_jobs:
+    # Ensure job is registered, even if only the subtitle file exists
+    job = subtitle_jobs.get(job_id)
+    if not job:
+        # Try to auto-register from orphaned subtitle file
+        for ext in ("srt", "vtt", "ass"):
+            filename = f"subtitles_{job_id}.{ext}"
+            if os.path.exists(filename):
+                try:
+                    with open(filename, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    job = {
+                        "status": "completed",
+                        "progress": 100,
+                        "segment_count": content.count('\n\n'),
+                        "language": "en",
+                        "format": ext,
+                        "download_url": f"/api/download/subtitles/{job_id}/{filename}",
+                        "completed_at": "imported",
+                        "filename": filename,
+                        "content": content,
+                        "user_id": current_user.id,
+                        "created_at": None
+                    }
+                    subtitle_jobs[job_id] = job
+                    save_subtitle_jobs()
+                    break
+                except Exception:
+                    pass
+    if not job:
         raise HTTPException(404, "Job not found")
-    
-    job = subtitle_jobs[job_id]
-    
     if job["user_id"] != current_user.id:
         raise HTTPException(403, "Access denied")
-    
     if job.get("status") != "completed":
         raise HTTPException(400, "Subtitles not ready yet. Status: " + job.get("status", "unknown"))
-    
-    # Try to read the subtitle file
     format = job.get("format", "srt")
     filename = job.get("filename", f"subtitles_{job_id}.{format}")
-    
     try:
         if os.path.exists(filename):
             with open(filename, "r", encoding="utf-8") as f:
                 subtitle_content = f.read()
         else:
-            # Return content if it's stored in the job
             subtitle_content = job.get("content", "")
-            
-            # If not stored, try to read from download_url path
             if not subtitle_content and job.get("download_url"):
                 subtitle_path = filename
                 if os.path.exists(subtitle_path):
@@ -2468,7 +2528,6 @@ async def review_subtitles(
                         subtitle_content = f.read()
     except Exception as e:
         subtitle_content = ""
-    
     return {
         "success": True,
         "job_id": job_id,
