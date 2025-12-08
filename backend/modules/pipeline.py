@@ -785,7 +785,6 @@ class VideoTranslationPipeline:
                     try:
                         combined = AudioSegment.from_file(first_path)
                         logger.info(f"Starting merge with chunk {first_idx}: {first_path}")
-
                         # Add remaining chunks
                         for idx, path in valid_paths[1:]:
                             try:
@@ -796,7 +795,6 @@ class VideoTranslationPipeline:
                                 logger.warning(f"Failed to load chunk {idx}: {chunk_error}")
                                 # Add silence for missing chunk to maintain timing
                                 silence_duration = chunks[idx].duration_ms if idx < len(chunks) else 1000
-                                silence = AudioSegment.silent(duration=silence_duration)
                                 combined += silence
                                 logger.info(f"Added silence for missing chunk {idx}")
 
@@ -808,7 +806,6 @@ class VideoTranslationPipeline:
                         # Fallback: copy first available chunk
                         try:
                             shutil.copy2(first_path, merged_audio)
-                            logger.warning("Using first chunk as fallback for merged audio")
                         except:
                             logger.error("Fallback audio merge also failed")
                             return {
@@ -831,20 +828,20 @@ class VideoTranslationPipeline:
                 logger.error("No translated audio paths returned from processing")
                 return {
                     "success": False,
-                    "error": "Audio translation failed - no output generated",
                     "processing_time_s": (datetime.now() - start_time).total_seconds(),
                     "output_path": "",
                     "target_language": target_lang
                 }
             
-            # 6. Merge with video
             logger.info("6. Merging with video...")
-            output_filename = f"translated_{os.path.basename(video_path)}"
+            if job_id:
+                output_filename = f"translated_video_{job_id}.mp4"
+            else:
+                output_filename = f"translated_{os.path.basename(video_path)}"
             output_path = os.path.join(self.config.output_dir, output_filename)
             
             if not self.merge_files_fast(video_path, merged_audio, output_path):
                 return {
-                    "success": False,
                     "error": "Video merge failed",
                     "processing_time_s": (datetime.now() - start_time).total_seconds(),
                     "output_path": "",
@@ -859,33 +856,32 @@ class VideoTranslationPipeline:
                 all_segments = []
                 for seg_list in subtitle_segments:
                     all_segments.extend(seg_list)
-                
-                if all_segments:
-                    base_name = os.path.splitext(output_path)[0]
-                    srt_path = f"{base_name}.srt"
-                    
-                    # Create simple SRT
-                    srt_content = ""
-                    for i, seg in enumerate(all_segments, 1):
-                        start = seg.get("start", 0)
-                        end = seg.get("end", start + 5)
-                        text = seg.get("text", "")
-                        
-                        def format_time(seconds):
-                            h = int(seconds // 3600)
-                            m = int((seconds % 3600) // 60)
-                            s = int(seconds % 60)
-                            ms = int((seconds - int(seconds)) * 1000)
-                            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-                        
-                        srt_content += f"{i}\n"
-                        srt_content += f"{format_time(start)} --> {format_time(end)}\n"
-                        srt_content += f"{text}\n\n"
-                    
-                    with open(srt_path, 'w', encoding='utf-8') as f:
-                        f.write(srt_content)
-                    
-                    subtitle_files["srt"] = srt_path
+
+                base_name = os.path.splitext(output_path)[0]
+                srt_path = f"{base_name}.srt"
+
+                # Create simple SRT
+                srt_content = ""
+                for i, seg in enumerate(all_segments, 1):
+                    start = seg.get("start", 0)
+                    end = seg.get("end", start + 5)
+                    text = seg.get("text", "")
+
+                    def format_time(seconds):
+                        h = int(seconds // 3600)
+                        m = int((seconds % 3600) // 60)
+                        s = int(seconds % 60)
+                        ms = int((seconds - int(seconds)) * 1000)
+                        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+                    srt_content += f"{i}\n"
+                    srt_content += f"{format_time(start)} --> {format_time(end)}\n"
+                    srt_content += f"{text}\n\n"
+
+                with open(srt_path, 'w', encoding='utf-8') as f:
+                    f.write(srt_content)
+
+                subtitle_files["srt"] = srt_path
             
             total_time = (datetime.now() - start_time).total_seconds()
             
@@ -894,12 +890,10 @@ class VideoTranslationPipeline:
             
             result = {
                 "success": True,
-                "input_video": video_path,
                 "output_video": output_path,
                 "target_language": target_lang,
                 "processing_time_s": total_time,
                 "subtitle_files": subtitle_files,
-                "chunks_processed": len(translated_paths),
                 "total_chunks": len(chunks),
                 "message": f"Translation completed in {total_time:.1f}s"
             }
@@ -908,7 +902,6 @@ class VideoTranslationPipeline:
             logger.info(f"  Output: {output_path}")
             if subtitle_files:
                 logger.info(f"  Subtitles: {list(subtitle_files.keys())}")
-            
             return result
             
         except Exception as e:

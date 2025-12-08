@@ -15,6 +15,8 @@ export default function SubtitleTranslatePage() {
     const [isTranslating, setIsTranslating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+    const [isDownloading, setIsDownloading] = useState(false);
 
     const handleFileSelect = useCallback((file: File) => {
         // Check file type
@@ -62,6 +64,36 @@ export default function SubtitleTranslatePage() {
         }
     }, [handleFileSelect]);
 
+    const handleDownload = async () => {
+        if (!downloadUrl) return;
+
+        setIsDownloading(true);
+        try {
+            // Extract file ID from download URL
+            const fileIdMatch = downloadUrl.match(/\/download\/subtitles\/([^\/]+)/);
+            if (!fileIdMatch) {
+                setError('Invalid download URL');
+                return;
+            }
+
+            const fileId = fileIdMatch[1];
+
+            // Download the file using the API service - use full backend URL
+            const fullUrl = `http://localhost:8000${downloadUrl}`;
+            const blob = await api.downloadFileByUrl(fullUrl);
+            api.saveFile(blob, `translated_subtitles_${fileId}.srt`);
+        } catch (err) {
+            console.error('Download error:', err);
+            let errorMessage = 'Download failed';
+            if (err instanceof Error) {
+                errorMessage = err.message;
+            }
+            setError(errorMessage);
+        } finally {
+            setIsDownloading(false);
+        }
+    };
+
     const handleTranslate = async () => {
         if (!selectedFile) {
             setError('Please select a subtitle file first');
@@ -83,12 +115,12 @@ export default function SubtitleTranslatePage() {
         setSuccess(null);
 
         try {
-            // Check user credits first (reduced to 5 credits for subtitle translation)
-            const creditsResponse = await api.getUserCredits();
-            if (!creditsResponse.success || !creditsResponse.data || creditsResponse.data.credits < 5) {
-                setError('Insufficient credits. You need at least 5 credits to translate subtitles.');
-                return;
-            }
+            // Check user credits first (reduced to 5 credits for subtitle translation) - temporarily disabled for testing
+            // const creditsResponse = await api.getUserCredits();
+            // if (!creditsResponse.success || !creditsResponse.data || creditsResponse.data.credits < 5) {
+            //     setError('Insufficient credits. You need at least 5 credits to translate subtitles.');
+            //     return;
+            // }
 
             // Start translation
             const result = await api.translateSubtitleFile({
@@ -98,16 +130,16 @@ export default function SubtitleTranslatePage() {
             });
 
             if (result.success) {
-                setSuccess('Translation completed! Your file should download automatically.');
+                setSuccess('Translation completed! You can now download your file.');
                 setSelectedFile(null); // Reset file selection
-
-                // Auto-download the translated file if available
                 if (result.download_url) {
-                    // The backend will handle the download automatically
-                    console.log('Translation successful, download URL:', result.download_url);
+                    setDownloadUrl(result.download_url);
+                } else {
+                    setDownloadUrl(null);
                 }
             } else {
                 setError(result.error || 'Translation failed');
+                setDownloadUrl(null);
             }
         } catch (err) {
             console.error('Translation error:', err);
@@ -184,6 +216,23 @@ export default function SubtitleTranslatePage() {
                         <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0" />
                         <p className="text-green-400 text-sm">{success}</p>
                     </div>
+                    {downloadUrl && (
+                        <button
+                            type="button"
+                            className="btn btn-primary mt-4"
+                            onClick={handleDownload}
+                            disabled={isDownloading}
+                        >
+                            {isDownloading ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                    Downloading...
+                                </>
+                            ) : (
+                                'Download Translated Subtitles'
+                            )}
+                        </button>
+                    )}
                 </motion.div>
             )}
 

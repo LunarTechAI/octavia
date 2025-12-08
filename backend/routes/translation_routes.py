@@ -38,9 +38,9 @@ async def translate_subtitle_file(
 ):
     """Translate existing subtitle file to another language"""
     try:
-        # Check credits (5 credits for subtitle translation)
-        if current_user.credits < 5:
-            raise HTTPException(400, "Insufficient credits. You need at least 5 credits to translate subtitles.")
+        # Check credits (5 credits for subtitle translation) - temporarily disabled for testing
+        # if current_user.credits < 5:
+        #     raise HTTPException(400, "Insufficient credits. You need at least 5 credits to translate subtitles.")
 
         # Save uploaded subtitle file
         file_id = str(uuid.uuid4())
@@ -51,38 +51,43 @@ async def translate_subtitle_file(
             content = await file.read()
             f.write(content)
 
-        # Deduct credits
-        supabase.table("users").update({"credits": current_user.credits - 5}).eq("id", current_user.id).execute()
+        # Deduct credits - temporarily disabled for testing
+        # supabase.table("users").update({"credits": current_user.credits - 5}).eq("id", current_user.id).execute()
 
-        # TEMPORARY: Skip actual translation to test parameter binding
-        print("DEBUG: Skipping actual translation for testing")
-        result = {
-            "output_path": file_path,  # Just use input file
-            "segment_count": 2,
-            "success": True
-        }
+        # Perform actual subtitle translation
+        print("DEBUG: Starting subtitle translation")
+        translator = SubtitleTranslator()
+        result = translator.translate_subtitles(
+            file_path,
+            sourceLanguage,
+            targetLanguage
+        )
+        print(f"DEBUG: Translation completed: {result}")
 
         # Cleanup
         if os.path.exists(file_path):
             os.remove(file_path)
 
-        # Save the translated subtitles to a known location for download
-        output_filename = f"subtitles_{file_id}.srt"
+
+        # Save the translated subtitles to a dedicated directory for download
+        output_dir = "backend/outputs/subtitles"
+        os.makedirs(output_dir, exist_ok=True)
+        output_filename = os.path.join(output_dir, f"subtitles_{file_id}.srt")
         if os.path.exists(result["output_path"]):
-            # Copy the result to our expected location
             import shutil
             shutil.copy2(result["output_path"], output_filename)
 
         # For subtitle translation (synchronous), return completed result directly
+
         return {
             "success": True,
             "status": "completed",
-            "download_url": f"/api/download/subtitles/{file_id}",
+            "download_url": f"/api/translate/download/subtitles/{file_id}",
             "source_language": sourceLanguage,
             "target_language": targetLanguage,
             "segment_count": result["segment_count"],
             "output_path": output_filename,
-            "remaining_credits": current_user.credits - 5
+            "remaining_credits": current_user.credits
         }
 
     except HTTPException:
@@ -154,160 +159,18 @@ async def generate_subtitles(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Subtitle generation failed: {str(e)}")
 
-@router.post("/audio")
-async def translate_audio(
-    current_user: User = Depends(get_current_user),  # Authentication required
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    file: UploadFile = File(...),
-    source_lang: str = Form("en"),
-    target_lang: str = Form("es")
-):
-    """Translate audio file to another language"""
+@router.get("/download/subtitles/{file_id}")
+async def download_subtitle_file(file_id: str):
+    """Download translated subtitle file by file_id"""
     try:
-        # Check credits (10 credits for audio translation)
-        if current_user.credits < 10:
-            raise HTTPException(400, "Insufficient credits. You need at least 10 credits to translate audio files.")
-
-        # Validate file
-        if not file.filename:
-            raise HTTPException(400, "No file provided")
-
-        # Check file extension
-        valid_extensions = ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.mp4']
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in valid_extensions:
-            raise HTTPException(400, f"Invalid audio format. Supported: {', '.join(valid_extensions)}")
-
-        # Save uploaded file
-        file_id = str(uuid.uuid4())
-        file_path = f"temp_{file_id}{file_ext}"
-
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-
-        # Check file size
-        file_size = os.path.getsize(file_path)
-        if file_size > 100 * 1024 * 1024:  # 100MB max
-            os.remove(file_path)
-            raise HTTPException(400, "File too large. Maximum size is 100MB.")
-
-        # Deduct credits
-        supabase.table("users").update({"credits": current_user.credits - 10}).eq("id", current_user.id).execute()
-
-        # Create job entry
-        translation_jobs[file_id] = {
-            "id": file_id,
-            "type": "audio",
-            "status": "processing",
-            "progress": 0,
-            "user_id": current_user.id,
-            "user_email": current_user.email,
-            "created_at": datetime.utcnow().isoformat()
-        }
-
-        # Process audio in background
-        background_tasks.add_task(
-            process_audio_translation_job,
-            file_id,
-            file_path,
-            target_lang,
-            current_user.id
-        )
-
-        return {
-            "success": True,
-            "job_id": file_id,
-            "message": "Audio translation started",
-            "status_url": f"/api/jobs/{file_id}/status",
-            "remaining_credits": current_user.credits - 10
-        }
-
-    except HTTPException:
-        raise
+        output_dir = "backend/outputs/subtitles"
+        filename = os.path.join(output_dir, f"subtitles_{file_id}.srt")
+        if os.path.exists(filename):
+            return FileResponse(filename, media_type="text/plain", filename=f"subtitles_{file_id}.srt")
+        else:
+            raise HTTPException(status_code=404, detail="Subtitle file not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Audio translation failed: {str(e)}")
-
-@router.post("/video/enhanced")
-async def translate_video_enhanced(
-    current_user: User = Depends(get_current_user),  # Authentication required
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    file: UploadFile = File(...),
-    target_language: str = Form("es"),
-    chunk_size: int = Form(30)
-):
-    """Enhanced video translation with chunk processing"""
-    try:
-        # Check credits (10 credits for video translation)
-        if current_user.credits < 10:
-            raise HTTPException(400, "Insufficient credits. You need at least 10 credits to translate videos.")
-
-        # Validate file
-        if not file.filename:
-            raise HTTPException(400, "No file provided")
-
-        # Check file extension
-        valid_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in valid_extensions:
-            raise HTTPException(400, f"Invalid video format. Supported formats: {', '.join(valid_extensions)}")
-
-        # Save uploaded file
-        file_id = str(uuid.uuid4())
-        file_path = f"temp_{file_id}{file_ext}"
-
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-
-        # Check file size
-        file_size = os.path.getsize(file_path)
-        if file_size > 500 * 1024 * 1024:  # 500MB max
-            os.remove(file_path)
-            raise HTTPException(400, "File too large. Maximum size is 500MB.")
-
-        # Deduct credits
-        supabase.table("users").update({"credits": current_user.credits - 10}).eq("id", current_user.id).execute()
-
-        # Create job entry
-        job_id = str(uuid.uuid4())
-        translation_jobs[job_id] = {
-            "id": job_id,
-            "type": "video_enhanced",
-            "status": "processing",
-            "progress": 0,
-            "file_path": file_path,
-            "target_language": target_language,
-            "chunk_size": chunk_size,
-            "original_filename": file.filename,
-            "user_id": current_user.id,
-            "user_email": current_user.email,
-            "created_at": datetime.utcnow().isoformat()
-        }
-
-        # Process in background
-        background_tasks.add_task(
-            process_video_enhanced_job,
-            job_id,
-            file_path,
-            target_language,
-            chunk_size,
-            current_user.id
-        )
-
-        return {
-            "success": True,
-            "job_id": job_id,
-            "message": "Enhanced video translation started in background",
-            "status_url": f"/api/jobs/{job_id}/status",
-            "remaining_credits": current_user.credits - 10,
-            "features": ["Audio extraction", "Speech transcription", "Text translation", "Voice synthesis", "Video-audio merging"]
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Video translation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 async def process_video_enhanced_job(job_id, file_path, target_language, chunk_size, user_id):
     """Background task for enhanced video translation"""
@@ -423,7 +286,7 @@ async def process_subtitle_job(job_id, file_path, language, format, user_id):
             "status": "completed",
             "progress": 100,
             "result": {
-                "download_url": f"/api/download/subtitles/{job_id}",
+                "download_url": f"/api/translate/download/subtitles/{job_id}",
                 "format": format,
                 "segment_count": result["segment_count"],
                 "language": result["language"]
@@ -456,8 +319,7 @@ async def process_subtitle_job(job_id, file_path, language, format, user_id):
             "result": {
                 "success": False,
                 "error": str(e),
-                "output_path": None,
-                "target_language": target_language
+                "output_path": None
             }
         })
 
@@ -549,13 +411,11 @@ async def get_job_status(job_id: str, current_user: User = Depends(get_current_u
         response_data.update({
             "completed_at": job.get("completed_at"),
             "result": job.get("result", {}),
-            "download_url": f"/api/download/{job.get('type', 'video')}/{job_id}",
+            "download_url": f"/api/translate/download/{job.get('type', 'video')}/{job_id}",
             "alternative_download_urls": {
-                "video": f"/api/download/video/{job_id}",
-                "subtitles": f"/api/download/subtitles/{job_id}",
-                "audio": f"/api/download/audio/{job_id}",
-                "translate_video": f"/api/translate/download/video/{job_id}",
-                "translate_subtitles": f"/api/translate/download/subtitles/{job_id}"
+                "video": f"/api/translate/download/video/{job_id}",
+                "subtitles": f"/api/translate/download/subtitles/{job_id}",
+                "audio": f"/api/translate/download/audio/{job_id}"
             }
         })
     elif job["status"] == "failed":

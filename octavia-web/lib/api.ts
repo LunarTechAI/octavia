@@ -428,7 +428,15 @@ async downloadTranslatedSubtitle(jobId: string): Promise<Blob> {
 
 async translateSubtitleFile(
   data: TranslationRequest
-): Promise<ApiResponse<{ job_id: string; status_url: string }>> {
+): Promise<ApiResponse<{
+  status: string;
+  download_url: string;
+  source_language: string;
+  target_language: string;
+  segment_count: number;
+  output_path: string;
+  remaining_credits: number;
+}>> {
   try {
     // Use query parameters instead of form data for language parameters
     // to avoid FastAPI parameter binding issues with File + Form combination
@@ -444,7 +452,15 @@ async translateSubtitleFile(
       targetLanguage: data.targetLanguage
     });
 
-    return this.request<{ job_id: string; status_url: string }>(endpoint, {
+    return this.request<{
+      status: string;
+      download_url: string;
+      source_language: string;
+      target_language: string;
+      segment_count: number;
+      output_path: string;
+      remaining_credits: number;
+    }>(endpoint, {
       method: 'POST',
       body: formData,
     }, true);  // Authentication required
@@ -1011,10 +1027,7 @@ async translateSubtitleFile(
   async downloadFileByUrl(url: string): Promise<Blob> {
     const token = this.getToken();
 
-    // Fix URL to use correct backend endpoint
-    const fixedUrl = url.replace('/api/download/', '/api/translate/download/');
-
-    const response = await fetch(fixedUrl, {
+    const response = await fetch(url, {
       headers: token ? {
         'Authorization': `Bearer ${token}`
       } : {},
