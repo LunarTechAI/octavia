@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  octavia:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/test_samples:/app/test_samples
+      - ./backend/outputs:/app/outputs
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('healthcheck ok')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
