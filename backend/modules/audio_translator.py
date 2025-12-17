@@ -191,6 +191,18 @@ class AudioTranslator:
         try:
             if not self.whisper_model:
                 self.load_models()
+
+            # Handle faster-whisper (incompatible with openai-whisper mel logic)
+            if getattr(self, '_using_faster_whisper', False):
+                # faster-whisper detects language during transcription setup
+                segments, info = self.whisper_model.transcribe(audio_path, beam_size=1)
+                logger.info(f"Detected language: {info.language} (confidence: {info.language_probability:.2%})")
+                
+                # Map Whisper language codes to our codes
+                lang_map = {
+                    "en": "en", "de": "de", "ru": "ru", "es": "es", "fr": "fr"
+                }
+                return lang_map.get(info.language, self.config.source_lang)
             
             # Load and process audio
             audio = whisper.load_audio(audio_path)
