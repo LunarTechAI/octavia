@@ -9,8 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Dict, Optional, List, Any
-import whisper
-from transformers import pipeline, MarianMTModel, MarianTokenizer
+try:
+    import whisper
+    from transformers import pipeline, MarianMTModel, MarianTokenizer
+    ML_MODULES_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: ML modules failed to import: {e}")
+    ML_MODULES_AVAILABLE = False
+    # Define dummy classes/functions if needed or handle checks later
+
 import os
 import json as _json
 import json
@@ -34,14 +41,27 @@ from pydantic import BaseModel, EmailStr
 import traceback
 import hashlib
 from datetime import timezone
-import pysrt
-import io
-from gtts import gTTS
-from pydub import AudioSegment
-import edge_tts
+try:
+    import pysrt
+    import io
+    from gtts import gTTS
+    from pydub import AudioSegment
+    import edge_tts
+    import torch
+    ADDITIONAL_ML_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Additional ML modules failed to import: {e}")
+    ADDITIONAL_ML_AVAILABLE = False
+    # Define dummy classes if needed
+    class AudioSegment:
+        pass
+    class gTTS:
+        def __init__(self, *args, **kwargs): pass
+        def save(self, *args, **kwargs): pass
+
 import asyncio
 from typing import Optional
-import torch
+
 
 
 from dotenv import load_dotenv
@@ -69,7 +89,13 @@ uvicorn.config.LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s - %
 uvicorn.config.LOGGING_CONFIG["formatters"]["access"]["fmt"] = "%(asctime)s - %(levelname)s - %(message)s"
 
 # Import route modules
-from routes.translation_routes import router as translation_router
+try:
+    from routes.translation_routes import router as translation_router
+except Exception as e:
+    print(f"Warning: Failed to import translation routes: {e}")
+    from fastapi import APIRouter
+    translation_router = APIRouter()
+
 
 # Create FastAPI app instance
 app = FastAPI(
@@ -361,70 +387,6 @@ class TranslationRequest(BaseModel):
     target_language: str = "es"
     chunk_size: int = 30
 
-# Authentication helper functions
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return password_manager.verify_password(plain_password, hashed_password)
-
-def get_password_hash(password: str) -> str:
-    return password_manager.hash_password(password)
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
-    return encoded_jwt
-
-def verify_token(token: str):
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        return None
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-        )
-    
-    try:
-        response = supabase.table("users").select("*").eq("id", user_id).execute()
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-            )
-        
-        user_data = response.data[0]
-        return User(
-            id=user_data["id"],
-            email=user_data["email"],
-            name=user_data["name"],
-            is_verified=user_data["is_verified"],
-            credits=user_data["credits"],
-            created_at=user_data["created_at"]
-        )
-    except Exception as db_error:
-        logger.error(f"Error fetching user: {db_error}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching user data",
-        )
 
 # Credit management functions
 def add_user_credits(user_id: str, credits_to_add: int, description: str = "Credit purchase"):
@@ -1314,7 +1276,8 @@ async def demo_login():
 
         if DEMO_MODE:
             # Fallback: return hardcoded demo user and token
-            user_id = "demo-user-id"
+            # Must match the user_id expected by get_current_user in shared_dependencies.py
+            user_id = "550e8400-e29b-41d4-a716-446655440000"
             access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
             access_token = create_access_token(
                 data={"sub": user_id, "email": demo_email},

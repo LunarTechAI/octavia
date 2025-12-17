@@ -2,4 +2,14 @@ pyvideotrans/
 win-pyvideotrans-v3.85.7z
 .DS_Store
 tts-venv/
-
+__pycache__/
+*.pyc
+*.mp4
+*.log
+node_modules/
+backend/backend/
+input/
+backend/outputs/
+.env
+.ipynb_checkpoints/
+.vscode/

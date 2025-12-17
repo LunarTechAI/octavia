@@ -25,7 +25,16 @@ print(f"DEBUG: DEMO_MODE environment variable: '{DEMO_MODE_ENV}'")
 print(f"DEBUG: DEMO_MODE parsed: {DEMO_MODE_ENV.lower() == 'true'}")
 
 # Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+# Initialize Supabase client
+try:
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    else:
+        print("WARNING: SUPABASE_URL or SUPABASE_SERVICE_KEY not set. Supabase client not initialized.")
+        supabase = None
+except Exception as e:
+    print(f"WARNING: Failed to initialize Supabase client: {e}")
+    supabase = None
 
 # Password management utility
 class PasswordManager:
@@ -122,15 +131,26 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
     # DEMO_MODE: return static demo user if token matches
     DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
     print(f"DEBUG: DEMO_MODE={DEMO_MODE}, user_id={user_id}")
-    if DEMO_MODE and user_id == "550e8400-e29b-41d4-a716-446655440000":
+    
+    # Accept both the UUID and the old 'demo-user-id' to handle stale tokens
+    valid_demo_ids = ["550e8400-e29b-41d4-a716-446655440000", "demo-user-id"]
+    
+    if DEMO_MODE and (user_id in valid_demo_ids):
         print("DEBUG: Using demo user")
         return User(
-            id="550e8400-e29b-41d4-a716-446655440000",
+            id=user_id, # Keep the ID from the token
             email="demo@octavia.com",
             name="Demo User",
             is_verified=True,
             credits=5000,
             created_at=datetime.utcnow()
+        )
+
+    if supabase is None:
+        print("Error: Supabase client is not initialized")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
         )
 
     try:
@@ -151,6 +171,7 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             created_at=user_data["created_at"]
         )
     except Exception as db_error:
+        print(f"Database error: {db_error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching user data",
