@@ -1330,7 +1330,8 @@ class AudioTranslator:
 
             # Create temporary output path
             base_name = os.path.splitext(os.path.basename(input_path))[0]
-            temp_output = f"{base_name}_preprocessed.wav"
+            # Save preprocessed file in the same directory as input file
+            temp_output = os.path.join(os.path.dirname(input_path), f"{base_name}_preprocessed.wav")
 
             # Build FFmpeg filter chain
             filters = []

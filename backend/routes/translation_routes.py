@@ -738,24 +738,8 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
     user_email = translation_jobs[job_id].get("user_email", "")
     is_demo_user = DEMO_MODE and user_email == "demo@octavia.com"
 
-    if is_demo_user:
-        # Simulate a successful translation for demo user
-        translation_jobs[job_id].update({
-            "status": "completed",
-            "progress": 100,
-            "result": {
-                "download_url": f"/api/download/audio/{job_id}",
-                "duration_match_percent": 100,
-                "speed_adjustment": 1.0
-            },
-            "completed_at": datetime.utcnow().isoformat(),
-            "output_path": file_path,
-            "message": "Demo audio translation complete. (No real processing performed)"
-        })
-        # Optionally, remove the temp file
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        return
+    # Demo user check removed to enable full processing
+
 
     try:
         # Update job status
@@ -842,7 +826,7 @@ async def process_video_job(job_id, file_path, target_language, user_id):
                 # Configure pipeline for full processing
                 config = PipelineConfig(
                     chunk_size=30,  # Process in 30-second chunks
-                    use_gpu=False,  # Use CPU for broader compatibility
+                    # use_gpu defaults to auto-detect in PipelineConfig
                     temp_dir="/tmp/octavia_video",
                     output_dir="backend/outputs"
                 )

@@ -34,7 +34,7 @@ def test_video_translation():
     print("=" * 60)
 
     # Test video path
-    test_video_path = "backend/test_samples/sample_30s_en.mp4"
+    test_video_path = "translated_output_rus.mp4"
 
     # Check if test video exists
     if not os.path.exists(test_video_path):
