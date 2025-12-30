@@ -80,19 +80,22 @@ export default function TranslationProgressPage() {
                     setEstimatedTime(`~${estimatedMinutes} minute${estimatedMinutes !== 1 ? 's' : ''}`);
                 }
 
-                // If job is completed, redirect to review page after delay
+                // If job is completed, stop polling and redirect to review page after delay
                 if (jobDataResponse.status === "completed") {
-                    console.log("Job completed, redirecting...");
+                    console.log("Job completed, stopping polling and redirecting...");
+                    if (intervalRef.current) {
+                        clearInterval(intervalRef.current);
+                        intervalRef.current = null;
+                    }
                     setTimeout(() => {
                         router.push(`/dashboard/video/review?jobId=${jobId}`);
                     }, 3000);
-                }
-
-                // If job failed, stop polling
-                if (jobDataResponse.status === "failed") {
+                } else if (jobDataResponse.status === "failed") {
+                    // If job failed, stop polling
                     console.log("Job failed, stopping polling");
                     if (intervalRef.current) {
                         clearInterval(intervalRef.current);
+                        intervalRef.current = null;
                     }
                 }
             } else {

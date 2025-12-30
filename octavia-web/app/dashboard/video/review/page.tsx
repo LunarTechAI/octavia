@@ -15,6 +15,7 @@ export default function VideoReviewPage() {
     const [loading, setLoading] = useState(true);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [isDownloading, setIsDownloading] = useState(false);
 
     const getToken = (): string | null => {
         if (typeof window === 'undefined') return null;
@@ -44,27 +45,33 @@ export default function VideoReviewPage() {
             return;
         }
 
+        // If we already have video or error, or are downloading, don't fetch
+        if (videoUrl || error || isDownloading) {
+            return;
+        }
+
         try {
-            // Try the main status endpoint
+            // Try main status endpoint
             const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/jobs/${jobId}/status`, {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
 
             if (!response.ok) {
-                // Try the translation routes endpoint
+                // Try translation routes endpoint
                 const altResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/translate/jobs/${jobId}/status`, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
-                
+
                 if (!altResponse.ok) {
                     throw new Error(`Failed to fetch job status: ${response.status}`);
                 }
-                
+
                 const altData = await altResponse.json();
                 setJobStatus(altData.data || altData);
-                
+
                 // Check if completed and try to download
-                if (altData.data?.status === 'completed' || altData.status === 'completed') {
+                if ((altData.data?.status === 'completed' || altData.status === 'completed') && !videoUrl && !isDownloading) {
+                    setIsDownloading(true);
                     await downloadVideo(jobId, token);
                 }
                 return;
@@ -74,8 +81,9 @@ export default function VideoReviewPage() {
             console.log('Job status:', data);
             setJobStatus(data.data || data);
 
-            // If job is completed, try to download the video
-            if ((data.data?.status === 'completed' || data.status === 'completed') && !videoUrl) {
+            // If job is completed, try to download video (only once)
+            if ((data.data?.status === 'completed' || data.status === 'completed') && !videoUrl && !isDownloading) {
+                setIsDownloading(true);
                 await downloadVideo(jobId, token);
             }
 
@@ -94,7 +102,6 @@ export default function VideoReviewPage() {
         const endpoints = [
             `/api/download/video/${jobId}`,
             `/api/download/${jobId}`,
-            `/api/translate/download/video/${jobId}`,
         ];
 
         for (const endpoint of endpoints) {
@@ -139,15 +146,18 @@ export default function VideoReviewPage() {
     useEffect(() => {
         fetchJobStatus();
 
-        // Poll every 3 seconds if not completed
-        const interval = setInterval(() => {
-            if (!videoUrl && !error) {
-                fetchJobStatus();
-            }
-        }, 3000);
+        // Only poll if job is not complete (no videoUrl, no error, and not downloading)
+        if (!videoUrl && !error && !isDownloading) {
+            // Poll every 5 seconds if not completed
+            const interval = setInterval(() => {
+                if (!videoUrl && !error && !isDownloading) {
+                    fetchJobStatus();
+                }
+            }, 5000);
 
-        return () => clearInterval(interval);
-    }, [jobId]);
+            return () => clearInterval(interval);
+        }
+    }, [jobId, videoUrl, error, isDownloading]);
 
     const handleDownload = () => {
         if (videoUrl) {

@@ -102,9 +102,10 @@ def verify_token(token: str):
     except JWTError:
         return None
 
-async def get_current_user(token: str = Depends(HTTPBearer())):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     """Get current user from JWT token"""
-    payload = verify_token(token.credentials)
+    token = credentials.credentials
+    payload = verify_token(token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -119,13 +120,15 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             detail="Invalid authentication credentials",
         )
 
-    # DEMO_MODE: return static demo user if token matches
+    # DEMO_MODE: return static demo user if enabled
     DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
     print(f"DEBUG: DEMO_MODE={DEMO_MODE}, user_id={user_id}")
-    if DEMO_MODE and user_id == "550e8400-e29b-41d4-a716-446655440000":
+
+    if DEMO_MODE:
+        # In demo mode, return static demo user for any valid token
         print("DEBUG: Using demo user")
         return User(
-            id="550e8400-e29b-41d4-a716-446655440000",
+            id=user_id,
             email="demo@octavia.com",
             name="Demo User",
             is_verified=True,
@@ -133,6 +136,7 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             created_at=datetime.utcnow()
         )
 
+    # Normal mode: fetch user from Supabase
     try:
         response = supabase.table("users").select("*").eq("id", user_id).execute()
         if not response.data:
@@ -150,6 +154,8 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             credits=user_data["credits"],
             created_at=user_data["created_at"]
         )
+    except HTTPException:
+        raise
     except Exception as db_error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

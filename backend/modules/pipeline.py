@@ -541,6 +541,80 @@ class VideoTranslationPipeline:
             return rms > 0.02
         except:
             return True  # Assume speech by default
+
+    def _detect_source_language(self, video_path: str) -> Optional[str]:
+        """Detect the source language from the video audio"""
+        try:
+            logger.info("Detecting source language from video audio...")
+
+            # Extract a short sample of audio for language detection
+            temp_audio_path = os.path.join(self.config.temp_dir, "lang_detect.wav")
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', video_path,
+                '-vn',
+                '-acodec', 'pcm_s16le',
+                '-ar', '16000',  # 16kHz for Whisper
+                '-ac', '1',  # Mono
+                '-t', '10',  # First 10 seconds
+                '-loglevel', 'error',
+                temp_audio_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0 or not os.path.exists(temp_audio_path):
+                logger.warning("Could not extract audio sample for language detection")
+                return None
+
+            # Load Whisper model if not already loaded
+            if not hasattr(self, 'whisper_model') or self.whisper_model is None:
+                try:
+                    from faster_whisper import WhisperModel
+                    detect_model = WhisperModel(
+                        "tiny",  # Very small model for detection
+                        device="cpu",  # Use CPU for detection
+                        download_root=os.path.expanduser(self.config.cache_dir)
+                    )
+                except ImportError:
+                    import whisper
+                    detect_model = whisper.load_model("tiny", device="cpu")
+            else:
+                detect_model = self.whisper_model
+
+            # Detect language
+            try:
+                if hasattr(detect_model, 'transcribe'):
+                    # faster-whisper
+                    segments, info = detect_model.transcribe(
+                        temp_audio_path,
+                        language=None,  # Auto-detect
+                        beam_size=1,  # Faster
+                        vad_filter=True
+                    )
+                    detected_lang = info.language
+                else:
+                    # Original whisper
+                    result = detect_model.transcribe(temp_audio_path, language=None, verbose=False)
+                    detected_lang = result.get("language")
+
+                logger.info(f"Detected language: {detected_lang}")
+                return detected_lang
+
+            except Exception as detect_error:
+                logger.warning(f"Language detection failed: {detect_error}")
+                return None
+
+            finally:
+                # Clean up temp file
+                try:
+                    if os.path.exists(temp_audio_path):
+                        os.unlink(temp_audio_path)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Source language detection failed: {e}")
+            return None
     
     def process_chunks_batch(self, chunks: List[ChunkInfo], target_lang: str = "de", job_id: str = None, jobs_db: Dict = None):
         """Process chunks in batches for efficiency with real-time progress updates"""
@@ -717,7 +791,7 @@ class VideoTranslationPipeline:
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
     
-    def process_video_fast(self, video_path: str, target_lang: str = "de", job_id: str = None) -> Dict[str, Any]:
+    def process_video_fast(self, video_path: str, target_lang: str = "de", source_lang: str = None, job_id: str = None) -> Dict[str, Any]:
         """Fast video translation pipeline - optimized for FREE deployment"""
         start_time = datetime.now()
         
@@ -729,7 +803,11 @@ class VideoTranslationPipeline:
             
             # 1. Load models (cached)
             logger.info("1. Loading models...")
-            if not self.load_models(target_lang=target_lang):
+            # Detect source language if not provided
+            if source_lang is None:
+                source_lang = self._detect_source_language(video_path) or "en"
+            logger.info(f"Detected/using source language: {source_lang}")
+            if not self.load_models(source_lang=source_lang, target_lang=target_lang):
                 return {
                     "success": False,
                     "error": "Failed to load models",

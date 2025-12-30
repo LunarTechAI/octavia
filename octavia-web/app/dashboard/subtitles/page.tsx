@@ -4,12 +4,12 @@ import { motion } from "framer-motion";
 import { FileVideo, Captions, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useState, useCallback } from "react";
 import { useUser } from "@/contexts/UserContext";
-import { api } from "@/lib/api";
+import { api, safeApiResponse, isSuccess } from "@/lib/api";
 import { useRouter } from 'next/navigation';
 
 export default function SubtitleGenerationPage() {
   const router = useRouter();
-  const { user } = useUser();
+  const { user, refreshCredits } = useUser();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("en");
   const [format, setFormat] = useState("srt");
@@ -73,29 +73,35 @@ export default function SubtitleGenerationPage() {
     setSuccess(null);
 
     try {
-      // Check user credits first
-      const creditsResponse = await api.getUserCredits();
-      if (!creditsResponse.success || !creditsResponse.data || creditsResponse.data.credits < 1) {
+      const credits = user?.credits || 0;
+
+      if (credits < 1) {
         // Try to add test credits automatically
-        const addCredits = await api.addTestCredits(10);
-        if (!addCredits.success) {
+        const addCreditsResponse = await api.addTestCredits(10);
+        if (!addCreditsResponse.success) {
           setError('Insufficient credits. Unable to add test credits automatically.');
           setIsUploading(false);
           return;
         }
+
+        // Refresh credits after adding
+        await refreshCredits();
       }
 
       const response = await api.generateSubtitles(selectedFile, format, language);
 
-      if (response.success && response.job_id) {
+      if (isSuccess(response) && response.data && response.data.job_id) {
         setSuccess('Subtitle generation started! Redirecting to progress page...');
 
-        // Store the job ID for progress tracking
-        localStorage.setItem('current_subtitle_job', response.job_id);
+        // Store job ID for progress tracking
+        localStorage.setItem('current_subtitle_job', response.data.job_id);
+
+        // Refresh credits to show updated balance
+        await refreshCredits();
 
         // Redirect to progress page after a short delay
         setTimeout(() => {
-          router.push(`/dashboard/subtitles/progress?jobId=${response.job_id}`);
+          router.push(`/dashboard/subtitles/progress?jobId=${response.data.job_id}`);
         }, 1500);
       } else {
         setError(response.error || 'Failed to start subtitle generation');

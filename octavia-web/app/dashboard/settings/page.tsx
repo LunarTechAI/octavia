@@ -36,28 +36,86 @@ export default function SettingsPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [loading, setLoading] = useState(true);
 
-    // Load settings on component mount
-    useEffect(() => {
-        const loadSettings = async () => {
-            try {
-                const response = await api.getUserSettings();
-                if (response.success && response.data?.settings) {
-                    const settings = response.data.settings;
-                    setNotifications({
-                        translationComplete: settings.notifications?.translationComplete ?? true,
-                        emailNotifications: settings.notifications?.emailNotifications ?? false,
-                        weeklySummary: settings.notifications?.weeklySummary ?? true,
-                    });
-                    setLanguage(settings.language || "English");
-                    setTimeZone(settings.time_zone || "UTC (GMT+0)");
-                }
-            } catch (error) {
-                console.error("Failed to load settings:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
+    const loadSettings = async () => {
+        try {
+            console.log("Loading settings for user:", user?.email);
 
+            // Check if user is authenticated
+            if (!user) {
+                console.log("No user found, using default settings");
+                setNotifications({
+                    translationComplete: true,
+                    emailNotifications: false,
+                    weeklySummary: true,
+                });
+                setLanguage("English");
+                setTimeZone("UTC (GMT+0)");
+                return;
+            }
+
+            const response = await api.getUserSettings();
+            console.log("Settings response:", response);
+
+            // Handle null/undefined response
+            if (!response) {
+                console.error("Settings API returned null/undefined response");
+                // Use default settings
+                setNotifications({
+                    translationComplete: true,
+                    emailNotifications: false,
+                    weeklySummary: true,
+                });
+                setLanguage("English");
+                setTimeZone("UTC (GMT+0)");
+                return;
+            }
+
+            if (response.success && response.data?.settings) {
+                const settings = response.data.settings;
+                setNotifications({
+                    translationComplete: settings.notifications?.translationComplete ?? true,
+                    emailNotifications: settings.notifications?.emailNotifications ?? false,
+                    weeklySummary: settings.notifications?.weeklySummary ?? true,
+                });
+                setLanguage(settings.language || "English");
+                setTimeZone(settings.time_zone || "UTC (GMT+0)");
+            } else if (response.error) {
+                console.error("Failed to load settings:", response.error);
+                // Use default settings on error
+                setNotifications({
+                    translationComplete: true,
+                    emailNotifications: false,
+                    weeklySummary: true,
+                });
+                setLanguage("English");
+                setTimeZone("UTC (GMT+0)");
+            } else {
+                console.error("Unexpected response structure:", response);
+                // Use default settings for unexpected responses
+                setNotifications({
+                    translationComplete: true,
+                    emailNotifications: false,
+                    weeklySummary: true,
+                });
+                setLanguage("English");
+                setTimeZone("UTC (GMT+0)");
+            }
+        } catch (error) {
+            console.error("Failed to load settings:", error);
+            // Use default settings on exception
+            setNotifications({
+                translationComplete: true,
+                emailNotifications: false,
+                weeklySummary: true,
+            });
+            setLanguage("English");
+            setTimeZone("UTC (GMT+0)");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         loadSettings();
     }, []);
 

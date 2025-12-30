@@ -327,20 +327,30 @@ class ApiService {
 
       // Parse successful response
       const responseText = await response.text();
+      console.log(`Response text received: "${responseText?.substring(0, 200)}..."`);
+
       let data: any = {};
-      
+
       if (responseText) {
         try {
           data = JSON.parse(responseText);
+          console.log('Parsed response data:', data);
         } catch (parseError) {
           console.error('Server returned invalid JSON:', parseError);
+          console.error('Raw response text:', responseText);
           return {
             success: false,
             error: 'Server returned an invalid response format',
           };
         }
+      } else {
+        console.warn('Server returned empty response');
+        return {
+          success: false,
+          error: 'Server returned an empty response',
+        };
       }
-      
+
       return data;
     } catch (error) {
       console.error('API request failed:', error);
@@ -1334,3 +1344,17 @@ async translateSubtitleFile(
 }
 
 export const api = new ApiService();
+
+// Helper function to safely access API response properties
+export const safeApiResponse = <T>(response: ApiResponse<T> | null, defaultValue: T): T => {
+  if (!response || !response.data) {
+    return defaultValue;
+  }
+  return response.data as T;
+};
+
+// Helper function to check if response is successful
+export const isSuccess = (response: ApiResponse | null): response is ApiResponse => {
+  return response !== null && response.success === true;
+};
+
