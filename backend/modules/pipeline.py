@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PipelineConfig:
     """Configuration for the video translation pipeline - FREE VERSION"""
-    chunk_size: int = 30
+    chunk_size: int = 10
     max_chunk_size: int = 120
     min_chunk_size: int = 10
     timing_tolerance_ms: int = 200

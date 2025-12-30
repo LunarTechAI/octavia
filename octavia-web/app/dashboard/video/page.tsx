@@ -45,11 +45,11 @@ export default function VideoTranslationPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
-      
+
       // Validate file type
       const validTypes = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.wmv', '.flv'];
       const fileExtension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
-      
+
       if (!validTypes.includes(fileExtension)) {
         setError(`Please upload a video file (${validTypes.join(', ')})`);
         return;
@@ -99,12 +99,12 @@ export default function VideoTranslationPage() {
 
     try {
       console.log("Starting video translation for file:", file.name);
-      
+
       // Create FormData
       const formData = new FormData();
       formData.append('file', file);
       formData.append('target_language', targetLanguage);
-      
+
       // Call the enhanced video translation endpoint
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/translate/video`, {
         method: 'POST',
@@ -130,26 +130,26 @@ export default function VideoTranslationPage() {
         const errorMessage = data.error || data.detail || data.message || `Upload failed: ${response.statusText}`;
         throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
       }
-      
+
       if (data.success && data.job_id) {
         setUploadProgress(100);
-        
+
         toast({
           title: "Translation started!",
           description: "Your video translation has been queued. Redirecting to progress page...",
           variant: "default",
         });
-        
+
         // Redirect to progress page with job ID
         router.push(`/dashboard/video/progress?jobId=${data.job_id}`);
-        
+
       } else {
         throw new Error(data.error || data.message || "Failed to start translation");
       }
     } catch (err: any) {
       console.error('Translation error:', err);
       setError(err.message || "Failed to start video translation");
-      
+
       toast({
         title: "Translation failed",
         description: err.message || "Failed to start translation. Please try again.",
@@ -178,13 +178,13 @@ export default function VideoTranslationPage() {
 
     try {
       console.log("Starting enhanced video translation for file:", file.name);
-      
+
       // Create FormData with chunk size
       const formData = new FormData();
       formData.append('file', file);
       formData.append('target_language', targetLanguage);
-      formData.append('chunk_size', '30'); // Chunk size for better processing
-      
+      formData.append('chunk_size', '10'); // 10s Chunk size for deeper processing
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/translate/video/enhanced`, {
         method: 'POST',
         headers: {
@@ -209,25 +209,25 @@ export default function VideoTranslationPage() {
         const errorMessage = data.error || data.detail || data.message || `Upload failed: ${response.statusText}`;
         throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
       }
-      
+
       if (data.success && data.job_id) {
         setUploadProgress(100);
-        
+
         toast({
           title: "Enhanced translation started!",
           description: "Your video is being processed with enhanced quality. Redirecting to progress page...",
           variant: "default",
         });
-        
+
         router.push(`/dashboard/video/progress?jobId=${data.job_id}`);
-        
+
       } else {
         throw new Error(data.error || data.message || "Failed to start enhanced translation");
       }
     } catch (err: any) {
       console.error('Enhanced translation error:', err);
       setError(err.message || "Failed to start enhanced translation");
-      
+
       toast({
         title: "Enhanced translation failed",
         description: err.message || "Failed to start enhanced translation. Please try again.",
@@ -239,26 +239,48 @@ export default function VideoTranslationPage() {
   };
 
   const generateAiInsights = (file: File) => {
-    // Simulate AI analysis (in real app, this would call backend API)
-    const fileSizeMB = file.size / (1024 * 1024);
-    const estimatedDurationMinutes = Math.max(1, Math.min(60, fileSizeMB * 2)); // Rough estimate
-    const estimatedChunks = Math.ceil(estimatedDurationMinutes * 2); // ~30s chunks
+    // Get actual duration using a temporary video element
+    const video = document.createElement('video');
+    video.preload = 'metadata';
 
-    setAiInsights({
-      estimatedChunks: Math.min(estimatedChunks, 100), // Cap at 100 for UI
-      estimatedDuration: `${Math.floor(estimatedDurationMinutes)}:${String(Math.floor((estimatedDurationMinutes % 1) * 60)).padStart(2, '0')}`,
-      detectedLanguage: "en" // Default assumption
-    });
+    video.onloadedmetadata = function () {
+      window.URL.revokeObjectURL(video.src);
+      const duration = video.duration;
+      const durationMinutes = duration / 60;
 
-    // Simulate language detection delay
-    setTimeout(() => {
-      if (aiInsights) {
+      // Calculate chunks based on actual duration (10s chunks for deeper analysis)
+      const estimatedChunks = Math.ceil(duration / 10);
+
+      const minutes = Math.floor(duration / 60);
+      const seconds = Math.floor(duration % 60);
+      const formattedDuration = `${minutes}:${String(seconds).padStart(2, '0')}`;
+
+      setAiInsights({
+        estimatedChunks: Math.max(1, estimatedChunks),
+        estimatedDuration: formattedDuration,
+        detectedLanguage: "en" // Default assumption
+      });
+
+      // Simulate language detection delay
+      setTimeout(() => {
         setAiInsights(prev => prev ? {
           ...prev,
           detectedLanguage: "en" // Simulated detection result
         } : null);
-      }
-    }, 2000);
+      }, 2000);
+    };
+
+    video.onerror = function () {
+      // Fallback for error reading metadata
+      const fileSizeMB = file.size / (1024 * 1024);
+      setAiInsights({
+        estimatedChunks: Math.ceil(fileSizeMB), // Rough fallback
+        estimatedDuration: "Unknown",
+        detectedLanguage: "en"
+      });
+    };
+
+    video.src = URL.createObjectURL(file);
   };
 
   const generateThumbnail = (file: File) => {
@@ -361,9 +383,9 @@ export default function VideoTranslationPage() {
       <motion.div
         whileHover={!file && !loading ? { scale: 1.01 } : {}}
         className={`glass-panel glass-panel-high relative border-2 border-dashed transition-all mb-6 overflow-hidden cursor-pointer group
-          ${file ? 'border-green-500/50 cursor-default' : 
-            loading ? 'border-primary-purple/30 cursor-wait' : 
-            'border-primary-purple/30 hover:border-primary-purple/50'}`}
+          ${file ? 'border-green-500/50 cursor-default' :
+            loading ? 'border-primary-purple/30 cursor-wait' :
+              'border-primary-purple/30 hover:border-primary-purple/50'}`}
         onClick={!file && !loading ? handleUploadClick : undefined}
       >
         <div className="glass-shine" />
@@ -405,42 +427,42 @@ export default function VideoTranslationPage() {
                 </button>
               )}
             </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center gap-3 text-center">
-          <div className={`flex items-center justify-center w-16 h-16 rounded-2xl ${loading ? 'bg-primary-purple/20' : 'bg-primary-purple/10'} border border-primary-purple/30 shadow-glow group-hover:scale-110 transition-transform`}>
-            {loading ? (
-              <Loader2 className="w-8 h-8 text-primary-purple-bright animate-spin" />
-            ) : (
-              <Upload className="w-8 h-8 text-primary-purple-bright" />
-            )}
-          </div>
-          <div>
-            <h3 className="text-white text-lg font-bold mb-1 text-glow-purple">
-              {loading ? 'Processing...' : 'Drop your video here'}
-            </h3>
-            <p className="text-slate-400 text-sm">
-              {loading ? 'Video upload in progress...' : 'or click to browse files • MP4, AVI, MOV, MKV, WEBM supported'}
-            </p>
-            <p className="text-slate-500 text-xs mt-2">Max file size: 500MB</p>
-          </div>
-        </div>
-      )}
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-3 text-center">
+              <div className={`flex items-center justify-center w-16 h-16 rounded-2xl ${loading ? 'bg-primary-purple/20' : 'bg-primary-purple/10'} border border-primary-purple/30 shadow-glow group-hover:scale-110 transition-transform`}>
+                {loading ? (
+                  <Loader2 className="w-8 h-8 text-primary-purple-bright animate-spin" />
+                ) : (
+                  <Upload className="w-8 h-8 text-primary-purple-bright" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-white text-lg font-bold mb-1 text-glow-purple">
+                  {loading ? 'Processing...' : 'Drop your video here'}
+                </h3>
+                <p className="text-slate-400 text-sm">
+                  {loading ? 'Video upload in progress...' : 'or click to browse files • MP4, AVI, MOV, MKV, WEBM supported'}
+                </p>
+                <p className="text-slate-500 text-xs mt-2">Max file size: 500MB</p>
+              </div>
+            </div>
+          )}
 
-      {/* Help Button */}
-      {!loading && (
-        <div className="absolute top-4 right-4">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowHelpModal(true);
-            }}
-            className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
-            aria-label="Help"
-          >
-            <span className="text-sm">?</span>
-          </button>
-        </div>
-      )}
+          {/* Help Button */}
+          {!loading && (
+            <div className="absolute top-4 right-4">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHelpModal(true);
+                }}
+                className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+                aria-label="Help"
+              >
+                <span className="text-sm">?</span>
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
 
@@ -499,7 +521,7 @@ export default function VideoTranslationPage() {
         {/* Target Language */}
         <div className="glass-card p-4">
           <label className="text-white text-sm font-semibold mb-2 block">Target Language</label>
-          <select 
+          <select
             className="glass-select w-full"
             value={targetLanguage}
             onChange={(e) => setTargetLanguage(e.target.value)}
@@ -535,7 +557,7 @@ export default function VideoTranslationPage() {
             <div className="flex-1">
               <h3 className="text-white text-sm font-bold mb-1">AI Analysis Complete</h3>
               <p className="text-slate-300 text-sm">
-                AI will split your {aiInsights.estimatedDuration} video into ~{aiInsights.estimatedChunks} chunks to ensure perfect 10-hour sync and frame-accurate lip sync.
+                AI will split your {aiInsights.estimatedDuration} video into ~{aiInsights.estimatedChunks} chunks to ensure perfect A/V sync and frame-accurate audio sync.
               </p>
             </div>
           </div>
@@ -573,7 +595,7 @@ export default function VideoTranslationPage() {
       {/* Action Buttons */}
       <div className="flex flex-col gap-4">
         {/* Standard Translation */}
-        <button 
+        <button
           onClick={handleStartTranslation}
           disabled={!file || loading}
           className="btn-border-beam w-full group disabled:opacity-50 disabled:cursor-not-allowed"
@@ -594,7 +616,7 @@ export default function VideoTranslationPage() {
         </button>
 
         {/* Enhanced Translation */}
-        <button 
+        <button
           onClick={handleEnhancedTranslation}
           disabled={!file || loading}
           className="glass-panel p-4 text-center border border-primary-purple/30 hover:border-primary-purple/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"

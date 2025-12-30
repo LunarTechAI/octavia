@@ -25,7 +25,16 @@ print(f"DEBUG: DEMO_MODE environment variable: '{DEMO_MODE_ENV}'")
 print(f"DEBUG: DEMO_MODE parsed: {DEMO_MODE_ENV.lower() == 'true'}")
 
 # Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+# Initialize Supabase client
+try:
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    else:
+        print("WARNING: SUPABASE_URL or SUPABASE_SERVICE_KEY not set. Supabase client not initialized.")
+        supabase = None
+except Exception as e:
+    print(f"WARNING: Failed to initialize Supabase client: {e}")
+    supabase = None
 
 # Password management utility
 class PasswordManager:
@@ -157,6 +166,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(H
     except HTTPException:
         raise
     except Exception as db_error:
+        print(f"Database error: {db_error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching user data",

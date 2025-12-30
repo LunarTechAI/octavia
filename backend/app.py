@@ -1277,7 +1277,8 @@ async def demo_login():
 
         if DEMO_MODE:
             # Fallback: return hardcoded demo user and token
-            user_id = "demo-user-id"
+            # Must match the user_id expected by get_current_user in shared_dependencies.py
+            user_id = "550e8400-e29b-41d4-a716-446655440000"
             access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
             access_token = create_access_token(
                 data={"sub": user_id, "email": demo_email},
