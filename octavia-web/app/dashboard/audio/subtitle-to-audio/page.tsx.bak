@@ -5,7 +5,6 @@ import { FileText, AudioWaveform, Sparkles, Upload, Download, X, Loader2, Info, 
 import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@/contexts/UserContext";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -22,7 +21,6 @@ interface VoiceOption {
 
 export default function SubtitleToAudioPage() {
   const { toast } = useToast();
-  const { user, refreshCredits } = useUser();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -30,6 +28,7 @@ export default function SubtitleToAudioPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string>("idle");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [userCredits, setUserCredits] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   
   const [sourceLanguage, setSourceLanguage] = useState("en");
@@ -74,9 +73,31 @@ export default function SubtitleToAudioPage() {
     return null;
   };
 
-  // Refresh credits when component mounts
+  // Fetch user credits on component mount
   useEffect(() => {
-    refreshCredits();
+    const fetchUserCredits = async () => {
+      const token = getToken();
+      if (!token) return;
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/user/credits`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setUserCredits(data.credits || 0);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch user credits:', error);
+      }
+    };
+
+    fetchUserCredits();
   }, []);
 
   // Load available voices when target language changes
@@ -95,9 +116,9 @@ export default function SubtitleToAudioPage() {
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.voices) {
-            const voices = data.voices.map((v: any) => ({
-              value: v.voice_id || v.name || v,
-              label: v.name || v
+            const voices = data.voices.map((v: string) => ({
+              value: v,
+              label: v
             }));
             setAvailableVoices(voices);
             if (voices.length > 0) {
@@ -220,8 +241,8 @@ export default function SubtitleToAudioPage() {
     }
 
     // Check if user has enough credits (5 credits for subtitle to audio)
-    if ((user?.credits || 0) < 5) {
-      setError(`Insufficient credits. You need 5 credits but only have ${user?.credits || 0}. Please purchase more credits.`);
+    if (userCredits < 5) {
+      setError(`Insufficient credits. You need 5 credits but only have ${userCredits}. Please purchase more credits.`);
       return;
     }
 
@@ -273,11 +294,12 @@ export default function SubtitleToAudioPage() {
         setJobStatus("processing");
         setUploadProgress(30);
         
+        // Update user credits
+        if (data.remaining_credits !== undefined) {
+          setUserCredits(data.remaining_credits);
+        }
+        
         // Start polling for job status
-        pollJobStatus(data.job_id);
-
-        // Refresh user credits to update the balance
-        refreshCredits();
         pollJobStatus(data.job_id);
       } else {
         throw new Error(data.error || data.message || "Failed to start audio generation");
@@ -636,7 +658,7 @@ export default function SubtitleToAudioPage() {
           <div className="glass-card px-4 py-2">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-primary-purple-bright animate-pulse"></div>
-              <span className="text-white text-sm">Credits: <span className="font-bold">{user?.credits || 0}</span></span>
+              <span className="text-white text-sm">Credits: <span className="font-bold">{userCredits}</span></span>
             </div>
             <p className="text-slate-400 text-xs mt-1">5 credits per generation</p>
           </div>
@@ -905,7 +927,7 @@ export default function SubtitleToAudioPage() {
         ) : (
           <button
             onClick={handleGenerateAudio}
-            disabled={!selectedFile || isGenerating || (user?.credits || 0) < 5}
+            disabled={!selectedFile || isGenerating || userCredits < 5}
             className="btn-border-beam w-full group disabled:opacity-50 disabled:cursor-not-allowed bg-primary-purple/10 border-primary-purple/30 hover:bg-primary-purple/20 transition-all duration-300"
           >
             <div className="btn-border-beam-inner flex items-center justify-center gap-2 py-4 text-base">
@@ -918,8 +940,8 @@ export default function SubtitleToAudioPage() {
                 <>
                   <AudioWaveform className="w-5 h-5 group-hover:scale-110 transition-transform duration-300" />
                   <span>
-                    {(user?.credits || 0) < 5 ? 'Insufficient Credits' : 'Generate Audio'}
-                    {(user?.credits || 0) >= 5 && ` (5 credits)`}
+                    {userCredits < 5 ? 'Insufficient Credits' : 'Generate Audio'}
+                    {userCredits >= 5 && ` (5 credits)`}
                   </span>
                 </>
               )}
@@ -1080,7 +1102,7 @@ export default function SubtitleToAudioPage() {
             <div>Download URL: <span className="text-gray-400 truncate block">{downloadUrl || 'None'}</span></div>
             <div>API Base: <span className="text-gray-400">{API_BASE_URL}</span></div>
             <div>Selected File: <span className="text-gray-400">{selectedFile?.name || 'None'}</span></div>
-            <div>User Credits: <span className="text-gray-400">{user?.credits || 0}</span></div>
+            <div>User Credits: <span className="text-gray-400">{userCredits}</span></div>
             <div>Available Voices: <span className="text-gray-400">{availableVoices.length}</span></div>
             <div>Source Language: <span className="text-gray-400">{sourceLanguage}</span></div>
             <div>Target Language: <span className="text-gray-400">{targetLanguage}</span></div>

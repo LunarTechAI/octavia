@@ -117,16 +117,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (!user) {
       return { success: false, error: 'No user logged in' };
     }
-    
+
     try {
       const response = await api.getUserCredits();
-      if (response.success && response.credits !== undefined) {
+      if (response && response.success && response.credits !== undefined) {
         const updatedUser = { ...user, credits: response.credits };
         setUser(updatedUser);
         localStorage.setItem('octavia_user', JSON.stringify(updatedUser));
         return { success: true, credits: response.credits };
       } else {
-        return { success: false, error: response.error || 'Failed to fetch credits' };
+        return { success: false, error: response?.error || 'Failed to fetch credits' };
       }
     } catch (error) {
       console.error('Could not refresh credits:', error);

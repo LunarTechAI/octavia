@@ -4,100 +4,43 @@ FastAPI application with Supabase authentication and Polar.sh payments
 Complete video translation pipeline with credit system
 """
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Response, Depends, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Dict, Optional, List, Any
-try:
-    import whisper
-    from transformers import pipeline, MarianMTModel, MarianTokenizer
-    ML_MODULES_AVAILABLE = True
-except Exception as e:
-    print(f"Warning: ML modules failed to import: {e}")
-    ML_MODULES_AVAILABLE = False
-    # Define dummy classes/functions if needed or handle checks later
-
 import os
-import json as _json
-import json
+import logging
 import uuid
-import shutil
-import subprocess
-import logging
-import asyncio
-from datetime import datetime, timedelta
-import time
-from contextlib import asynccontextmanager
-import psutil
-import sys
 import smtplib
-from email.mime.text import MIMEText
+import io
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, List
 from email.mime.multipart import MIMEMultipart
-from supabase import create_client, Client
-from jose import JWTError, jwt
-import secrets
+from email.mime.text import MIMEText
+
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Request, Response, Form, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
-import traceback
-import hashlib
-from datetime import timezone
-try:
-    import pysrt
-    import io
-    from gtts import gTTS
-    from pydub import AudioSegment
-    import edge_tts
-    import torch
-    ADDITIONAL_ML_AVAILABLE = True
-except Exception as e:
-    print(f"Warning: Additional ML modules failed to import: {e}")
-    ADDITIONAL_ML_AVAILABLE = False
-    # Define dummy classes if needed
-    class AudioSegment:
-        pass
-    class gTTS:
-        def __init__(self, *args, **kwargs): pass
-        def save(self, *args, **kwargs): pass
+from fastapi.responses import JSONResponse, FileResponse
+from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
+from transformers import MarianTokenizer, MarianMTModel, pipeline
+import edge_tts
+import pysrt
+from gtts import gTTS
+from pydub import AudioSegment
 
-import asyncio
-from typing import Optional
+# Import config
+from config import DEMO_MODE, POLAR_WEBHOOK_SECRET, POLAR_ACCESS_TOKEN, POLAR_SERVER, ENABLE_TEST_MODE
 
+# Import routers
+# Note: Auth routes are currently implemented in app.py (not moved to routes yet)
+# from routes.auth_routes import router as auth_router
+from routes.user_routes import router as user_router
+from routes.payment_routes import router as payment_router
+from routes.job_routes import router as job_router
+from routes.translation_routes import router as translation_router
 
+# Import utility/helper functions from utils.py
+from utils import get_translator, translate_with_chunking, add_user_credits, update_transaction_status, send_verification_email, format_timestamp
 
-from dotenv import load_dotenv
-load_dotenv()
-
-# DEMO_MODE: enable demo login without Supabase
-DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
-
-# SET UP VERBOSE LOGGING
-import logging
-import sys
-
-logging.basicConfig(
-    level=logging.DEBUG,  # CHANGE FROM INFO TO DEBUG
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('backend_debug.log')
-    ]
-)
-
-# Also add this to see ALL FastAPI validation errors
-import uvicorn
-uvicorn.config.LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s - %(levelname)s - %(message)s"
-uvicorn.config.LOGGING_CONFIG["formatters"]["access"]["fmt"] = "%(asctime)s - %(levelname)s - %(message)s"
-
-# Import route modules
-try:
-    from routes.translation_routes import router as translation_router
-except Exception as e:
-    print(f"Warning: Failed to import translation routes: {e}")
-    from fastapi import APIRouter
-    translation_router = APIRouter()
-
-
-# Create FastAPI app instance
 app = FastAPI(
     title="Octavia Video Translator",
     description="Complete video translation pipeline with credit system",
@@ -106,82 +49,75 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include route modules
+# Register routers (auth routes are in app.py, not in routes/)
+app.include_router(user_router)
+app.include_router(payment_router)
+app.include_router(job_router)
 app.include_router(translation_router)
 
-# Import your existing modules with better error handling
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Initialize module availability flags
+import_errors = []
+AUDIO_TRANSLATOR_AVAILABLE = False
+SUBTITLE_GENERATOR_AVAILABLE = False
+INSTRUMENTATION_AVAILABLE = False
+PIPELINE_AVAILABLE = False
 
 try:
-    # Try importing core modules one by one with detailed error logging
-    import_errors = []
-
-    try:
-        from modules.audio_translator import AudioTranslator, TranslationConfig, TranslationResult
-        AUDIO_TRANSLATOR_AVAILABLE = True
-        print("✓ AudioTranslator loaded successfully")
-    except ImportError as e:
-        import_errors.append(f"AudioTranslator: {e}")
-        AUDIO_TRANSLATOR_AVAILABLE = False
-        print(f"✗ AudioTranslator failed: {e}")
-
-    try:
-        from modules.subtitle_generator import SubtitleGenerator
-        SUBTITLE_GENERATOR_AVAILABLE = True
-        print("✓ SubtitleGenerator loaded successfully")
-    except ImportError as e:
-        import_errors.append(f"SubtitleGenerator: {e}")
-        SUBTITLE_GENERATOR_AVAILABLE = False
-        print(f"✗ SubtitleGenerator failed: {e}")
-
-    try:
-        from modules.instrumentation import MetricsCollector
-        INSTRUMENTATION_AVAILABLE = True
-        print("✓ MetricsCollector loaded successfully")
-    except ImportError as e:
-        import_errors.append(f"MetricsCollector: {e}")
-        INSTRUMENTATION_AVAILABLE = False
-        print(f"✗ MetricsCollector failed: {e}")
-
-    try:
-        from modules.pipeline import VideoTranslationPipeline, PipelineConfig
-        PIPELINE_AVAILABLE = True
-        print("✓ VideoTranslationPipeline loaded successfully")
-    except ImportError as e:
-        import_errors.append(f"VideoTranslationPipeline: {e}")
-        PIPELINE_AVAILABLE = False
-        print(f"✗ VideoTranslationPipeline failed: {e}")
-
-    # Overall pipeline availability
-    if AUDIO_TRANSLATOR_AVAILABLE and SUBTITLE_GENERATOR_AVAILABLE:
-        PIPELINE_AVAILABLE = True
-        print("✓ Core pipeline modules loaded successfully")
-    else:
-        PIPELINE_AVAILABLE = False
-        print("⚠ Core pipeline modules partially available. Video translation will use basic processing.")
-
-    if import_errors:
-        print(f"Import errors encountered: {len(import_errors)}")
-        for error in import_errors[:3]:  # Show first 3 errors
-            print(f"  - {error}")
-
-except Exception as e:
-    print(f"✗ Pipeline modules initialization failed: {e}")
-    import traceback
-    traceback.print_exc()
-    PIPELINE_AVAILABLE = False
+    from modules.audio_translator import AudioTranslator, TranslationConfig, TranslationResult
+    AUDIO_TRANSLATOR_AVAILABLE = True
+    print("[OK] AudioTranslator loaded successfully")
+except ImportError as e:
+    import_errors.append(f"AudioTranslator: {e}")
     AUDIO_TRANSLATOR_AVAILABLE = False
+    print(f"[ERROR] AudioTranslator failed: {e}")
+
+try:
+    from modules.subtitle_generator import SubtitleGenerator
+    SUBTITLE_GENERATOR_AVAILABLE = True
+    print("[OK] SubtitleGenerator loaded successfully")
+except ImportError as e:
+    import_errors.append(f"SubtitleGenerator: {e}")
     SUBTITLE_GENERATOR_AVAILABLE = False
+    print(f"[ERROR] SubtitleGenerator failed: {e}")
+
+try:
+    from modules.instrumentation import MetricsCollector
+    INSTRUMENTATION_AVAILABLE = True
+    print("[OK] MetricsCollector loaded successfully")
+except ImportError as e:
+    import_errors.append(f"MetricsCollector: {e}")
     INSTRUMENTATION_AVAILABLE = False
+    print(f"[ERROR] MetricsCollector failed: {e}")
+
+try:
+    from modules.pipeline import VideoTranslationPipeline, PipelineConfig
+    PIPELINE_AVAILABLE = True
+    print("[OK] VideoTranslationPipeline loaded successfully")
+except ImportError as e:
+    import_errors.append(f"VideoTranslationPipeline: {e}")
+    PIPELINE_AVAILABLE = False
+    print(f"[ERROR] VideoTranslationPipeline failed: {e}")
+
+# Overall pipeline availability
+if AUDIO_TRANSLATOR_AVAILABLE and SUBTITLE_GENERATOR_AVAILABLE:
+    PIPELINE_AVAILABLE = True
+    print("[OK] Core pipeline modules loaded successfully")
+else:
+    PIPELINE_AVAILABLE = False
+    print("[WARNING] Core pipeline modules partially available. Video translation will use basic processing.")
+
+if import_errors:
+    print(f"Import errors encountered: {len(import_errors)}")
+    for error in import_errors[:3]:  # Show first 3 errors
+        print(f"  - {error}")
 
 # Import shared dependencies
 from shared_dependencies import (
@@ -387,6 +323,71 @@ class TranslationRequest(BaseModel):
     target_language: str = "es"
     chunk_size: int = 30
 
+# Authentication helper functions
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return password_manager.verify_password(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return password_manager.hash_password(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: str):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        return payload
+    except (JWTError, ExpiredSignatureError) as e:
+        logger.warning(f"JWT decode failed: {type(e).__name__}: {e}")
+        return None
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    
+    try:
+        response = supabase.table("users").select("*").eq("id", user_id).execute()
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+        
+        user_data = response.data[0]
+        return User(
+            id=user_data["id"],
+            email=user_data["email"],
+            name=user_data["name"],
+            is_verified=user_data["is_verified"],
+            credits=user_data["credits"],
+            created_at=user_data["created_at"]
+        )
+    except Exception as db_error:
+        logger.error(f"Error fetching user: {db_error}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching user data",
+        )
 
 # Credit management functions
 def add_user_credits(user_id: str, credits_to_add: int, description: str = "Credit purchase"):
@@ -807,51 +808,51 @@ async def process_video_translation_job(job_id: str, file_path: str, target_lang
     """Background task for video translation"""
     try:
         # Update job status
-        jobs_db[job_id]["progress"] = 10
+        jobs_db[job_id]["progress"] = 5
         jobs_db[job_id]["status"] = "processing"
-        jobs_db[job_id]["message"] = "Starting video processing..."
+        jobs_db[job_id]["message"] = "Initializing translation pipeline..."
 
         # Check if we have pipeline modules
         if PIPELINE_AVAILABLE:
             from modules.pipeline import VideoTranslationPipeline, PipelineConfig
 
-            # Process video
+            # Process video with job_id for progress tracking
             config = PipelineConfig(chunk_size=30)
             pipeline = VideoTranslationPipeline(config)
 
-            # Update progress
-            jobs_db[job_id]["progress"] = 30
-            jobs_db[job_id]["message"] = "Extracting audio from video..."
+            # Update progress - models loading
+            jobs_db[job_id]["progress"] = 10
+            jobs_db[job_id]["message"] = "Loading AI models..."
 
-            # Process the video
-            result = pipeline.process_video_fast(file_path, target_language)
+            # Process the video with job_id for progress updates
+            logger.info(f"Starting pipeline with job_id: {job_id}")
+            result = pipeline.process_video_fast(file_path, target_language, job_id=job_id, jobs_db=jobs_db)
+            logger.info(f"Pipeline result: {result}")
 
-            # Update progress
-            jobs_db[job_id]["progress"] = 80
-            jobs_db[job_id]["message"] = "Finalizing translation..."
+            if result.get("success"):
+                # Update progress based on result
+                output_path = result.get("output_video", f"backend/outputs/translated_video_{job_id}.mp4")
+                
+                # Ensure output file exists
+                if not os.path.exists(output_path):
+                    with open(output_path, "wb") as f:
+                        f.write(b"Placeholder - video translation completed")
 
-            # Save output - FIX: Use output_video instead of output_path
-            if result.get("success") and result.get("output_video"):
-                output_path = result["output_video"]
+                jobs_db[job_id].update({
+                    "status": "completed",
+                    "progress": 100,
+                    "download_url": f"/api/download/video/{job_id}",
+                    "output_path": output_path,
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "message": "Video translation completed successfully",
+                    # Add additional info from pipeline result
+                    "total_chunks": result.get("total_chunks", 0),
+                    "chunks_processed": result.get("chunks_processed", len(result.get("translated_paths", []))),
+                    "processing_time_s": result.get("processing_time_s", 0),
+                    "output_video": output_path
+                })
             else:
-                output_path = f"backend/outputs/translated_video_{job_id}.mp4"
-                # Create a simple output file
-                with open(output_path, "wb") as f:
-                    f.write(b"Placeholder - video translation completed")
-
-            jobs_db[job_id].update({
-                "status": "completed",
-                "progress": 100,
-                "download_url": f"/api/download/video/{job_id}",
-                "output_path": output_path,
-                "completed_at": datetime.utcnow().isoformat(),
-                "message": "Video translation completed successfully",
-                # Add additional info from pipeline result
-                "total_chunks": result.get("total_chunks", 0),
-                "chunks_processed": result.get("chunks_processed", 0),
-                "processing_time_s": result.get("processing_time_s", 0),
-                "output_video": output_path  # Also store as output_video for consistency
-            })
+                raise Exception(result.get("error", "Unknown error during processing"))
 
         else:
             # Simplified mode - video translation not available
@@ -1348,14 +1349,7 @@ async def get_user_credits(current_user: User = Depends(get_current_user)):
 
 # ========== PAYMENT ENDPOINTS ==========
 
-@app.get("/api/payments/packages")
-async def get_credit_packages():
-    """Get available credit packages"""
-    return {
-        "success": True,
-        "packages": CREDIT_PACKAGES,
-        "total_packages": len(CREDIT_PACKAGES)
-    }
+
 
 # ========== USER PROFILE MANAGEMENT ENDPOINTS ==========
 
@@ -1454,51 +1448,27 @@ async def update_user_settings(
 @app.get("/api/user/settings")
 async def get_user_settings(current_user: User = Depends(get_current_user)):
     """Get user settings"""
-    try:
-        # Since settings column may not exist, we'll return default settings
-        # In a production app, you might want to create a separate settings table
-        settings = {
-            "notifications": {
-                "translationComplete": True,
-                "emailNotifications": False,
-                "weeklySummary": True
-            },
-            "language": "English",
-            "time_zone": "UTC (GMT+0)"
-        }
+    logger.info(f"get_user_settings called for user: {current_user.email}")
 
-        # Try to get settings from user metadata if it exists
-        try:
-            response = supabase.table("users").select("*").eq("id", current_user.id).execute()
-            if response.data:
-                user_data = response.data[0]
-                # Check if user has any custom metadata that might contain settings
-                # For now, we'll just return defaults since settings column doesn't exist
-                pass
-        except Exception:
-            # If we can't query the user, just return defaults
-            pass
+    # Return default settings for all users (demo and production)
+    settings = {
+        "notifications": {
+            "translationComplete": True,
+            "emailNotifications": False,
+            "weeklySummary": True
+        },
+        "language": "English",
+        "time_zone": "UTC (GMT+0)"
+    }
 
-        return {
-            "success": True,
+    logger.info(f"Returning settings: {settings}")
+
+    return {
+        "success": True,
+        "data": {
             "settings": settings
         }
-
-    except Exception as e:
-        logger.error(f"Failed to get settings: {e}")
-        # Return default settings even on error
-        return {
-            "success": True,
-            "settings": {
-                "notifications": {
-                    "translationComplete": True,
-                    "emailNotifications": False,
-                    "weeklySummary": True
-                },
-                "language": "English",
-                "time_zone": "UTC (GMT+0)"
-            }
-        }
+    }
 
 @app.post("/api/user/change-password")
 async def change_user_password(
@@ -1750,7 +1720,7 @@ async def process_video_enhanced_job(job_id: str, file_path: str, target_languag
             "progress": 100,
             "result": result,
             "completed_at": datetime.utcnow().isoformat(),
-            "output_path": result["output_path"]
+            "output_path": result.get("output_path") or result.get("output_video")
         })
         
         # Cleanup temp file
@@ -1847,12 +1817,54 @@ async def get_job_status(job_id: str, current_user: User = Depends(get_current_u
             "processing_time_s": job.get("processing_time_s"),
             "chunks_processed": job.get("chunks_processed"),
             "total_chunks": job.get("total_chunks"),
+            "available_chunks": job.get("available_chunks", []),
             "download_url": job.get("download_url") if job.get("status") == "completed" else None,
             "error": job.get("error"),
             "message": job.get("message", f"Job {job.get('status', 'pending')}")
         }
 
     return response
+
+@app.get("/api/download/chunk/{job_id}/{chunk_id}")
+async def download_chunk(job_id: str, chunk_id: int, current_user: User = Depends(get_current_user)):
+    """Download a specific translated chunk for preview"""
+    # Verify job access
+    if job_id not in jobs_db:
+        raise HTTPException(404, "Job not found")
+
+    job = jobs_db[job_id]
+    if job.get("user_id") != current_user.id:
+        raise HTTPException(403, "Access denied")
+
+    # Check if chunk exists
+    available_chunks = job.get("available_chunks", [])
+    chunk_info = None
+    for chunk in available_chunks:
+        if chunk.get("id") == chunk_id:
+            chunk_info = chunk
+            break
+
+    if not chunk_info:
+        raise HTTPException(404, "Chunk not available yet")
+
+    # Get chunk file path
+    preview_dir = os.path.join("backend/outputs/previews", job_id)
+    chunk_path = os.path.join(preview_dir, f"chunk_{chunk_id:04d}.wav")
+
+    if not os.path.exists(chunk_path):
+        raise HTTPException(404, "Chunk file not found")
+
+    # Return chunk file
+    return FileResponse(
+        chunk_path,
+        media_type="audio/wav",
+        filename=f"chunk_{chunk_id:04d}.wav",
+        headers={
+            "Content-Disposition": f"attachment; filename=chunk_{chunk_id:04d}.wav",
+            "Cache-Control": "no-cache"
+        }
+    )
+
 @app.get("/api/download/{file_type}/{file_id}")
 async def download_file(file_type: str, file_id: str, current_user: User = Depends(get_current_user)):
     """Download generated files"""
@@ -1872,7 +1884,23 @@ async def download_file(file_type: str, file_id: str, current_user: User = Depen
             if job.get("status") != "completed":
                 raise HTTPException(400, "Video not ready yet")
             # Try output_path, output_video, and fallback
-            filename = job.get("output_path") or job.get("output_video") or f"backend/outputs/translated_video_{file_id}.mp4"
+            output_path = job.get("output_path")
+            output_video = job.get("output_video")
+
+            # Debug logging
+            logger.info(f"Job data keys: {list(job.keys())}")
+            logger.info(f"output_path: {output_path} (type: {type(output_path)})")
+            logger.info(f"output_video: {output_video} (type: {type(output_video)})")
+
+            if isinstance(output_path, str):
+                filename = output_path
+            elif isinstance(output_video, str):
+                filename = output_video
+            else:
+                filename = f"backend/outputs/translated_video_{file_id}.mp4"
+
+            logger.info(f"Using filename: {filename} (type: {type(filename)})")
+
             if not os.path.exists(filename):
                 # Fallback to just the filename in cwd
                 fallback_name = f"translated_video_{file_id}.mp4"
@@ -2014,58 +2042,152 @@ async def download_video(
         logger.error(f"Job not completed: status = {job.get('status')}")
         raise HTTPException(400, "Video not ready yet. Status: " + job.get("status", "unknown"))
 
-    # Try to get filename from job data
-    filename = job.get("output_path") or job.get("output_video") or f"backend/outputs/translated_video_{job_id}.mp4"
-    logger.info(f"Looking for video file: {filename}")
+    # Try to get filename from job data - ensure it's a string
+    output_path = job.get("output_path")
+    output_video = job.get("output_video")
+
+    # Handle cases where the value might be a dict or other type
+    if isinstance(output_path, str):
+        filename = output_path
+    elif isinstance(output_video, str):
+        filename = output_video
+    else:
+        filename = f"backend/outputs/translated_video_{job_id}.mp4"
+
+    logger.info(f"Looking for video file: {filename} (type: {type(filename)})")
 
     # Check if file exists at the expected path
     if not os.path.exists(filename):
         logger.warning(f"Video file not found at expected path: {filename}")
 
-        # Try to find any .mp4 file with this job_id
+        # Try to find video file with more flexible search
         import glob
-        video_files = glob.glob(f"*{job_id}*.mp4")
-        if video_files:
-            filename = video_files[0]
-            logger.info(f"Found alternative video file: {filename}")
+        outputs_dir = "backend/outputs"
+
+        # Multiple search patterns to find the file
+        search_patterns = [
+            f"*{job_id}*.mp4",  # Any file containing job_id
+            f"{outputs_dir}/*{job_id}*.mp4",  # In outputs directory
+            f"{outputs_dir}/translated_video_{job_id}.mp4",  # Exact match
+        ]
+
+        for pattern in search_patterns:
+            matches = glob.glob(pattern)
+            if matches:
+                filename = matches[0]
+                logger.info(f"Found video file via pattern {pattern}: {filename}")
+                break
         else:
-            # Try to find in outputs directory
-            outputs_dir = "backend/outputs"
-            if os.path.exists(outputs_dir):
-                output_files = glob.glob(f"{outputs_dir}/*{job_id}*.mp4")
-                if output_files:
-                    filename = output_files[0]
-                    logger.info(f"Found video file in outputs directory: {filename}")
-                else:
-                    logger.error(f"No video files found for job {job_id}")
-                    raise HTTPException(404, "Video file not found")
-            else:
-                logger.error(f"No video files found for job {job_id}")
-                raise HTTPException(404, "Video file not found")
+            logger.error(f"Video file not found after searching patterns")
+            raise HTTPException(404, "Video file not found")
 
-    # Verify file is actually a video file
+    # Return the file
+    logger.info(f"Serving video file: {filename}")
+    return FileResponse(
+        filename,
+        media_type='video/mp4',
+        filename=f"translated_video_{job_id}.mp4"
+    )
+
+@app.get("/api/download/original/{job_id}")
+async def download_original_video(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Download original video file (if still available)"""
+    logger.info(f"Original video download request for job {job_id}")
+
+    # Check if job exists in jobs_db
+    if job_id not in jobs_db:
+        logger.error(f"Job {job_id} not found in jobs_db")
+        raise HTTPException(404, "Job not found")
+
+    job = jobs_db[job_id]
+    logger.info(f"Job status: {job.get('status')}, user_id: {job.get('user_id')}, current_user: {current_user.id}")
+
+    if job["user_id"] != current_user.id:
+        logger.error(f"Access denied: job user {job['user_id']} != current user {current_user.id}")
+        raise HTTPException(403, "Access denied")
+
+    # Get the original file path
+    file_path = job.get("file_path")
+    if not file_path or not isinstance(file_path, str):
+        logger.error(f"Original file path not found for job {job_id}")
+        raise HTTPException(404, "Original video file not available")
+
+    # Check if original file still exists
+    if not os.path.exists(file_path):
+        logger.warning(f"Original video file no longer exists: {file_path}")
+        raise HTTPException(404, "Original video file has been deleted after processing")
+
+    logger.info(f"Serving original video file: {file_path}")
+    return FileResponse(
+        file_path,
+        media_type='video/mp4',
+        filename=f"original_{job.get('original_filename', f'video_{job_id}')}"
+    )
+
+@app.get("/api/download/audio/{job_id}")
+async def download_audio(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Download translated audio file"""
+    logger.info(f"Audio download request for job {job_id}")
+    
+    # Check if job exists in jobs_db
+    if job_id not in jobs_db:
+        logger.error(f"Job {job_id} not found in jobs_db")
+        raise HTTPException(404, "Job not found")
+    
+    job = jobs_db[job_id]
+    logger.info(f"Job status: {job.get('status')}, user_id: {job.get('user_id')}, current_user: {current_user.id}")
+    
+    if job["user_id"] != current_user.id:
+        logger.error(f"Access denied: job user {job['user_id']} != current user {current_user.id}")
+        raise HTTPException(403, "Access denied")
+    
+    job_status = job.get("status")
+    if job_status != "completed":
+        logger.error(f"Job not completed: status = {job_status}")
+        raise HTTPException(400, f"Audio not ready yet. Status: {job_status}")
+    
+    # Try to get filename from job data
+    filename = job.get("output_path")
+    logger.info(f"Looking for audio file: {filename}")
+    
+    # Check if file exists at expected path
+    if not filename:
+        logger.error(f"No output_path set for audio job {job_id}")
+        raise HTTPException(404, "Audio file path not set. Please try the translation again.")
+    
+    if not os.path.exists(filename):
+        logger.error(f"Audio file not found at path: {filename}")
+        raise HTTPException(404, f"Audio file not found at: {filename}")
+    
+    # Verify file is actually an audio file
     file_size = os.path.getsize(filename)
-    logger.info(f"Video file size: {file_size} bytes")
-
-    if file_size < 10000:  # Suspiciously small for a video
-        logger.warning(f"Video file suspiciously small: {file_size} bytes")
+    logger.info(f"Audio file size: {file_size} bytes")
+    
+    if file_size < 1000:  # Suspiciously small for audio
+        logger.warning(f"Audio file suspiciously small: {file_size} bytes")
         # Check if it's an error message
         with open(filename, 'rb') as f:
             content = f.read(500)
-            if b'error' in content.lower() or b'failed' in content.lower() or b'<!doctype' in content.lower():
-                logger.error("Video file contains error message instead of video")
-                raise HTTPException(500, "Video generation failed. Please try again.")
-
+            if b'error' in content.lower() or b'failed' in content.lower():
+                logger.error("Audio file contains error message instead of audio")
+                raise HTTPException(500, "Audio generation failed. Please try again.")
+    
     # Generate download filename
-    original_name = job.get("original_filename", f"video_{job_id}")
+    original_name = job.get("original_filename", f"audio_{job_id}")
     base_name = os.path.splitext(original_name)[0]
     target_lang = job.get('target_language', 'es')
-    download_filename = f"{base_name}_translated_{target_lang}.mp4"
-    logger.info(f"Serving video file: {filename} as {download_filename}")
-
+    download_filename = f"{base_name}_translated_{target_lang}.mp3"
+    logger.info(f"Serving audio file: {filename} as {download_filename}")
+    
     return FileResponse(
         filename,
-        media_type="video/mp4",
+        media_type="audio/mpeg",
         filename=download_filename
     )
 
@@ -2077,6 +2199,25 @@ async def download_video_translate(
     """Download translated video file (alternative endpoint)"""
     # Just delegate to the main download endpoint
     return await download_video(job_id, current_user)
+
+@app.get("/api/download/{job_id}")
+async def download_generic(job_id: str, current_user: User = Depends(get_current_user)):
+    """Generic download endpoint that tries to find any file for this job"""
+    logger.info(f"Generic download request for job {job_id}")
+    
+    # Check in jobs_db (video or audio translation)
+    if job_id in jobs_db:
+        job = jobs_db[job_id]
+        job_type = job.get("type", "unknown")
+        
+        # Route to appropriate download handler based on job type
+        if job_type == "audio_translation" or job_type == "audio":
+            return await download_audio(job_id, current_user)
+        else:
+            return await download_video(job_id, current_user)
+
+
+
 
 # ========== HEALTH & TESTING ENDPOINTS ==========
 
@@ -2128,6 +2269,205 @@ async def debug_files(job_id: str, current_user: User = Depends(get_current_user
         return {"success": False, "error": "Job not found"}
 
     job = jobs_db[job_id]
+
+
+# ========== VOICES ENDPOINTS ==========
+
+@app.get("/api/voices/all")
+async def get_all_voices():
+    """Get all available voices grouped by language"""
+    voices_by_language = {}
+
+    for lang_code, voices in VOICE_OPTIONS.items():
+        voices_by_language[lang_code] = []
+
+        for voice_name, voice_id in voices.items():
+            gender = "Female" if "Female" in voice_name else "Male" if "Male" in voice_name else "Unknown"
+            voices_by_language[lang_code].append({
+                "name": voice_name,
+                "voice_id": voice_id,
+                "type": "Synthetic",
+                "language_code": lang_code,
+                "gender": gender,
+                "sample_text": "Hello! This is a preview of the voice."
+            })
+
+    return {
+        "success": True,
+        "voices_by_language": voices_by_language,
+        "total_voices": sum(len(v) for v in voices_by_language.values())
+    }
+
+@app.get("/api/voices/{language}")
+async def get_voices_by_language(language: str):
+    """Get voices for a specific language"""
+    if language not in VOICE_OPTIONS:
+        return {
+            "success": False,
+            "error": f"Language '{language}' not supported",
+            "available_languages": list(VOICE_OPTIONS.keys())
+        }
+
+    voices = VOICE_OPTIONS[language]
+    voice_list = []
+
+    for voice_name, voice_id in voices.items():
+        gender = "Female" if "Female" in voice_name else "Male" if "Male" in voice_name else "Unknown"
+        voice_list.append({
+            "name": voice_name,
+            "voice_id": voice_id,
+            "type": "Synthetic",
+            "language_code": language,
+            "gender": gender,
+            "sample_text": "Hello! This is a preview of the voice."
+        })
+
+    return {
+        "success": True,
+        "language": language,
+        "voices": voice_list
+    }
+
+
+@app.post("/api/voices/preview")
+async def preview_voice(
+    voice_id: str = Form(...),
+    text: str = Form(...),
+    language: str = Form(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate a voice preview for the selected voice"""
+    try:
+        # Check if user has enough credits (1 credit per preview)
+        if current_user.credits < 1:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Not enough credits. Each preview costs 1 credit."
+            )
+
+        # Map voice_id to actual voice name for TTS
+        voice_name_map = {
+            "aria_female": "en-US-AriaNeural",
+            "david_male": "en-US-GuyNeural",
+            "emma_female": "en-US-JennyNeural",
+            "brian_male": "en-US-ChristopherNeural",
+            "elena_female": "es-ES-ElviraNeural",
+            "alvaro_male": "es-ES-AlvaroNeural",
+            "esperanza_female": "es-ES-LauraNeural",
+            "jorge_male": "es-ES-JorgeNeural",
+            "denise_female": "fr-FR-DeniseNeural",
+            "henri_male": "fr-FR-HenriNeural",
+            "katja_female": "de-DE-KatjaNeural",
+            "conrad_male": "de-DE-ConradNeural",
+            "elsa_female": "it-IT-ElsaNeural",
+            "diego_male": "it-IT-DiegoNeural",
+        }
+
+        voice_name = voice_name_map.get(voice_id, "en-US-AriaNeural")
+
+        logger.info(f"Generating voice preview: voice_id={voice_id}, voice_name={voice_name}, text={text[:50]}")
+
+        # Ensure outputs directory exists
+        os.makedirs("outputs", exist_ok=True)
+
+        # Generate output filename
+        preview_filename = f"preview_{uuid.uuid4().hex[:8]}.mp3"
+        output_path = f"outputs/{preview_filename}"
+
+        # Generate speech using edge-tts (more reliable)
+        try:
+            import edge_tts
+            import io
+
+            # Get appropriate voice for Edge-TTS
+            voice = voice_name_map.get(voice_id, "en-US-AriaNeural")
+
+            logger.info(f"Generating voice preview: voice_id={voice_id}, voice_name={voice}, text={text[:50]}")
+
+            # Generate TTS audio synchronously
+            communicate = edge_tts.Communicate(text, voice=voice)
+            audio_bytes = io.BytesIO()
+
+            # Collect all audio chunks synchronously
+            audio_chunks = list(communicate.stream_sync())
+            chunk_count = 0
+            for chunk in audio_chunks:
+                if chunk["type"] == "audio":
+                    audio_bytes.write(chunk["data"])
+                    chunk_count += 1
+
+            if chunk_count == 0:
+                raise Exception("No audio data received from edge-tts service")
+
+            if len(audio_bytes.getvalue()) == 0:
+                raise Exception("Received audio chunks but total size is 0 bytes")
+
+            # Write audio data to file
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes.getvalue())
+
+            # Verify file was created and has content
+            if not os.path.exists(output_path):
+                raise Exception(f"Audio file was not created: {output_path}")
+
+            file_size = os.path.getsize(output_path)
+            if file_size == 0:
+                os.remove(output_path)
+                raise Exception("Generated audio file is empty after writing")
+
+            logger.info(f"Voice preview generated: {output_path}, chunks: {chunk_count}, size: {file_size} bytes")
+        except Exception as e:
+            # Clean up if file was created but is invalid
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                    logger.info(f"Cleaned up invalid file: {output_path}")
+                except:
+                    pass
+
+            logger.error(f"Failed to generate audio: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate voice preview: {str(e)}"
+            )
+
+        # Deduct 1 credit for preview
+        new_credits = current_user.credits - 1
+
+        # In demo mode, don't update database
+        if not (os.getenv("DEMO_MODE", "false").lower() == "true"):
+            supabase.table("users").update({"credits": new_credits}).eq("id", current_user.id).execute()
+
+        return {
+            "success": True,
+            "preview_url": f"/api/download/preview/{preview_filename}",
+            "credits_remaining": new_credits,
+            "message": "Preview generated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice preview error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate preview: {str(e)}"
+        )
+
+
+@app.get("/api/download/preview/{filename}")
+async def download_preview_audio(filename: str):
+    """Download generated voice preview"""
+    file_path = f"outputs/{filename}"
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preview file not found")
+
+    return FileResponse(
+        file_path,
+        media_type="audio/mpeg",
+        filename=filename
+    )
 
     if job["user_id"] != current_user.id:
         raise HTTPException(403, "Access denied")
@@ -2368,888 +2708,228 @@ async def review_subtitles(
         "completed_at": job.get("completed_at")
     }
 
-@app.post("/api/payments/create-session")
-async def create_payment_session(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        data = await request.json()
-        package_id = data.get("package_id")
 
-        if not package_id:
-            raise HTTPException(400, "Package ID is required")
 
-        package = CREDIT_PACKAGES.get(package_id)
-        if not package:
-            raise HTTPException(400, "Invalid package")
 
-        session_id = str(uuid.uuid4())
 
-        transaction_id = str(uuid.uuid4())
-        transaction_data = {
-            "id": transaction_id,
-            "user_id": current_user.id,
-            "email": current_user.email,
-            "package_id": package_id,
-            "credits": package["credits"],
-            "amount": package["price"],
-            "type": "credit_purchase",
-            "status": "pending",
-            "description": f"Pending purchase: {package['name']}",
-            "session_id": session_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
-        }
 
-        supabase.table("transactions").insert(transaction_data).execute()
 
-        logger.info(f"Created pending transaction {transaction_id} for user {current_user.email}")
 
-        if ENABLE_TEST_MODE:
-            await asyncio.sleep(1)
 
-            new_balance = add_user_credits(
-                current_user.id,
-                package["credits"],
-                f"Test purchase: {package['name']}"
-            )
 
-            update_transaction_status(
-                transaction_id,
-                "completed",
-                f"Test purchase completed: {package['name']}"
-            )
 
-            logger.info(f"Test purchase completed for user {current_user.email}")
 
-            return {
-                "success": True,
-                "test_mode": True,
-                "message": "Test credits added successfully",
-                "credits_added": package["credits"],
-                "new_balance": new_balance,
-                "checkout_url": None,
-                "session_id": session_id,
-                "transaction_id": transaction_id,
-                "status": "completed"
-            }
 
-        try:
-            checkout_link = package["checkout_link"]
 
-            if "email=" not in checkout_link:
-                separator = "&" if "?" in checkout_link else "?"
-                checkout_url = f"{checkout_link}{separator}email={current_user.email}"
-                checkout_url += f"&metadata[user_id]={current_user.id}"
-                checkout_url += f"&metadata[transaction_id]={transaction_id}"
-                checkout_url += f"&metadata[package_id]={package_id}"
-                checkout_url += f"&metadata[session_id]={session_id}"
-            else:
-                checkout_url = checkout_link
-                if "metadata[user_id]" not in checkout_url:
-                    separator = "&" if "?" in checkout_url else "?"
-                    checkout_url += f"{separator}metadata[user_id]={current_user.id}"
-                    checkout_url += f"&metadata[transaction_id]={transaction_id}"
-                    checkout_url += f"&metadata[package_id]={package_id}"
-                    checkout_url += f"&metadata[session_id]={session_id}"
 
-            logger.info(f"Created REAL payment session {session_id} for user {current_user.email}")
 
-            return {
-                "success": True,
-                "test_mode": False,
-                "session_id": session_id,
-                "transaction_id": transaction_id,
-                "checkout_url": checkout_url,
-                "package_id": package_id,
-                "credits": package["credits"],
-                "price": package["price"] / 100,
-                "message": "Checkout session created. You will be redirected to complete payment.",
-                "status": "pending"
-            }
 
-        except Exception as polar_error:
-            logger.error(f"Polar.sh error: {polar_error}")
-            traceback.print_exc()
-            return {
-                "success": False,
-                "test_mode": False,
-                "error": "Payment service temporarily unavailable.",
-                "message": "Unable to create payment session"
-            }
 
-    except HTTPException:
-        raise
-    except Exception as session_error:
-        logger.error(f"Failed to create payment session: {session_error}")
-        traceback.print_exc()
-        return {
-            "success": False,
-            "error": "Failed to create payment session.",
-            "message": "Internal server error"
-        }
-
-@app.get("/api/payments/status/{session_id}")
-async def get_payment_status(
-    session_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        response = supabase.table("transactions").select("*").eq("session_id", session_id).execute()
-
-        if not response.data:
-            raise HTTPException(404, "Transaction not found")
-
-        transaction = response.data[0]
-
-        if transaction["user_id"] != current_user.id:
-            raise HTTPException(403, "Access denied")
-
-        # Auto-completion logic for better user experience
-        if transaction["status"] == "pending":
-            created_at_str = transaction["created_at"]
-
-            try:
-                if created_at_str.endswith('Z'):
-                    created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                else:
-                    created_at = datetime.fromisoformat(created_at_str)
-
-                utc_now = datetime.utcnow().replace(tzinfo=timezone.utc)
-
-                # Calculate time elapsed - reduced to 60 seconds for better UX
-                time_elapsed = (utc_now - created_at).total_seconds()
-
-                # If more than 60 seconds have passed, auto-complete it
-                if time_elapsed > 60:
-                    package_id = transaction.get("package_id")
-
-                    if package_id and package_id in CREDIT_PACKAGES:
-                        package = CREDIT_PACKAGES[package_id]
-                        credits_to_add = package["credits"]
-
-                        # Add credits
-                        add_user_credits(
-                            current_user.id,
-                            credits_to_add,
-                            f"Auto-completed after 60s timeout: {package['name']}"
-                        )
-
-                        # Update transaction
-                        update_transaction_status(
-                            transaction["id"],
-                            "completed",
-                            f"Auto-completed: Payment likely succeeded but webhook delayed"
-                        )
-
-                        # Refresh transaction data
-                        response = supabase.table("transactions").select("*").eq("id", transaction["id"]).execute()
-                        if response.data:
-                            transaction = response.data[0]
-
-            except ValueError as date_error:
-                logger.error(f"Date parsing error: {date_error}")
-                pass
-
-        return {
-            "success": True,
-            "session_id": session_id,
-            "transaction_id": transaction["id"],
-            "status": transaction["status"],
-            "credits": transaction.get("credits", 0),
-            "description": transaction.get("description", ""),
-            "created_at": transaction.get("created_at"),
-            "updated_at": transaction.get("updated_at")
-        }
-
-    except HTTPException:
-        raise
-    except Exception as status_error:
-        logger.error(f"Failed to get payment status: {status_error}")
-        raise HTTPException(500, "Failed to get payment status")
-
-@app.post("/api/payments/webhook/polar")
-async def polar_webhook(request: Request):
-    try:
-        # Log raw request for debugging
-        logger.info(f"Polar webhook received. Headers: {dict(request.headers)}")
-
-        payload_body = await request.body()
-        payload = json.loads(payload_body)
-        event_type = payload.get("type")
-        event_id = payload.get("id")
-
-        logger.info(f"Polar webhook: {event_type} (ID: {event_id})")
-        logger.info(f"Webhook payload: {json.dumps(payload, indent=2)}")
-
-        # Store webhook for debugging
-        webhook_log = {
-            "id": str(uuid.uuid4()),
-            "event_type": event_type,
-            "event_id": event_id,
-            "payload": json.dumps(payload),
-            "received_at": datetime.utcnow().isoformat(),
-            "status": "received"
-        }
-
-        supabase.table("webhook_logs").insert(webhook_log).execute()
-
-        # Process all payment success events
-        if event_type in ["order.completed", "order.paid", "order.updated"]:
-            order_data = payload.get("data", {})
-            order_id = order_data.get("id")
-
-            # Check if order is actually paid
-            order_status = order_data.get("status", "")
-            is_paid = order_data.get("paid", False)
-
-            logger.info(f"Processing {event_type}: Order {order_id}, Status: {order_status}, Paid: {is_paid}")
-
-            # Only process if order is paid/completed
-            if is_paid and order_status in ["paid", "completed"]:
-                customer_email = order_data.get("customer_email")
-                amount = order_data.get("amount", 0)
-
-                logger.info(f"Payment SUCCESS: {order_id} for {customer_email} - Amount: {amount}")
-
-                # Look for metadata in multiple locations
-                metadata = {}
-                checkout_session = order_data.get("checkout_session", {})
-                if checkout_session:
-                    metadata.update(checkout_session.get("metadata", {}))
-
-                # Also check order metadata
-                metadata.update(order_data.get("metadata", {}))
-
-                logger.info(f"Metadata found: {metadata}")
-
-                # Find user by email first (most reliable)
-                user = None
-                if customer_email:
-                    response = supabase.table("users").select("*").eq("email", customer_email).execute()
-                    if response.data:
-                        user = response.data[0]
-                        logger.info(f"Found user by email: {user['id']} - {user['email']}")
-
-                # If no user found, check metadata
-                if not user and metadata.get("user_id"):
-                    response = supabase.table("users").select("*").eq("id", metadata.get("user_id")).execute()
-                    if response.data:
-                        user = response.data[0]
-                        logger.info(f"Found user by metadata user_id: {user['id']}")
-
-                if not user:
-                    logger.error(f"No user found for order {order_id}")
-                    # Try to find user by looking up transactions with this session_id
-                    if metadata.get("session_id"):
-                        response = supabase.table("transactions").select("*").eq("session_id", metadata.get("session_id")).execute()
-                        if response.data:
-                            tx = response.data[0]
-                            response = supabase.table("users").select("*").eq("id", tx["user_id"]).execute()
-                            if response.data:
-                                user = response.data[0]
-                                logger.info(f"Found user via session_id lookup: {user['id']}")
-
-                if not user:
-                    logger.error(f"No user found for order {order_id} after all attempts")
-                    # Create a failed transaction record for tracking
-                    transaction_data = {
-                        "id": str(uuid.uuid4()),
-                        "order_id": order_id,
-                        "customer_email": customer_email,
-                        "amount": order_data.get("amount", 0),
-                        "type": "credit_purchase",
-                        "status": "failed",
-                        "description": f"Order {order_id} - No user found",
-                        "created_at": datetime.utcnow().isoformat()
-                    }
-                    supabase.table("transactions").insert(transaction_data).execute()
-
-                    # Update webhook log with error
-                    supabase.table("webhook_logs").update({
-                        "status": "error",
-                        "error": f"No user found for order {order_id}"
-                    }).eq("id", webhook_log["id"]).execute()
-
-                    return {"success": False, "error": f"No user found for email: {customer_email}"}
-
-                # Determine which package was purchased
-                credits_to_add = 0
-                package_name = "Unknown Package"
-
-                # Try to find by package_id in metadata
-                if metadata.get("package_id") and metadata["package_id"] in CREDIT_PACKAGES:
-                    package = CREDIT_PACKAGES[metadata["package_id"]]
-                    credits_to_add = package["credits"]
-                    package_name = package["name"]
-                    logger.info(f"Found package by package_id: {package_name} ({credits_to_add} credits)")
-                else:
-                    # Fallback: match by amount
-                    for package_id, package in CREDIT_PACKAGES.items():
-                        if package["price"] == amount:
-                            credits_to_add = package["credits"]
-                            package_name = package["name"]
-                            logger.info(f"Matched package by amount: {package_name} ({credits_to_add} credits)")
-                            break
-
-                if credits_to_add == 0:
-                    # Default fallback based on amount ranges
-                    if amount >= 3499:
-                        credits_to_add = 500
-                        package_name = "Premium Credits (auto-detected)"
-                    elif amount >= 1999:
-                        credits_to_add = 250
-                        package_name = "Pro Credits (auto-detected)"
-                    else:
-                        credits_to_add = 100
-                        package_name = "Starter Credits (auto-detected)"
-                    logger.info(f"Using fallback credits: {credits_to_add} for amount {amount}")
-
-                # Update user credits
-                try:
-                    # Get current credits
-                    response = supabase.table("users").select("credits").eq("id", user["id"]).execute()
-                    if not response.data:
-                        raise Exception("User not found in database")
-
-                    current_credits = response.data[0]["credits"]
-                    new_credits = current_credits + credits_to_add
-
-                    # Update user in database
-                    update_result = supabase.table("users").update({
-                        "credits": new_credits,
-                        "updated_at": datetime.utcnow().isoformat()
-                    }).eq("id", user["id"]).execute()
-
-                    if update_result.data:
-                        logger.info(f"Updated credits for user {user['id']}: {current_credits} -> {new_credits}")
-                    else:
-                        logger.error(f"Failed to update credits for user {user['id']}")
-
-                    # Create transaction record
-                    transaction_id = str(uuid.uuid4())
-                    transaction_data = {
-                        "id": transaction_id,
-                        "user_id": user["id"],
-                        "email": user["email"],
-                        "order_id": order_id,
-                        "package_id": metadata.get("package_id", "unknown"),
-                        "credits": credits_to_add,
-                        "amount": amount,
-                        "type": "credit_purchase",
-                        "status": "completed",
-                        "description": f"Payment completed: {package_name} (Order {order_id})",
-                        "session_id": metadata.get("session_id", order_id),
-                        "created_at": datetime.utcnow().isoformat(),
-                        "updated_at": datetime.utcnow().isoformat()
-                    }
-
-                    # Check if transaction already exists (by session_id)
-                    existing_tx = None
-                    if metadata.get("session_id"):
-                        existing_tx = supabase.table("transactions") \
-                            .select("*") \
-                            .eq("session_id", metadata.get("session_id")) \
-                            .execute()
-
-                    # Also check by order_id
-                    if not existing_tx or not existing_tx.data:
-                        existing_tx = supabase.table("transactions") \
-                            .select("*") \
-                            .eq("order_id", order_id) \
-                            .execute()
-
-                    if not existing_tx.data:
-                        # Create new transaction
-                        supabase.table("transactions").insert(transaction_data).execute()
-                        logger.info(f"Created NEW transaction record: {transaction_id}")
-                    else:
-                        # Update existing transaction
-                        tx_id = existing_tx.data[0]["id"]
-                        supabase.table("transactions").update({
-                            "status": "completed",
-                            "credits": credits_to_add,
-                            "amount": amount,
-                            "updated_at": datetime.utcnow().isoformat(),
-                            "description": f"Payment completed: {package_name} (Order {order_id})",
-                            "order_id": order_id
-                        }).eq("id", tx_id).execute()
-                        logger.info(f"Updated EXISTING transaction: {tx_id}")
-
-                    # Update webhook log
-                    supabase.table("webhook_logs").update({
-                        "status": "processed",
-                        "user_id": user["id"],
-                        "transaction_id": transaction_id,
-                        "credits_added": credits_to_add
-                    }).eq("id", webhook_log["id"]).execute()
-
-                    logger.info(f"Successfully processed {event_type} webhook for order {order_id}")
-                    logger.info(f"Added {credits_to_add} credits to {user['email']}. New balance: {new_credits}")
-
-                    return {
-                        "success": True,
-                        "message": f"Added {credits_to_add} credits to user {user['email']}",
-                        "credits_added": credits_to_add,
-                        "new_balance": new_credits,
-                        "event_type": event_type,
-                        "order_id": order_id
-                    }
-
-                except Exception as credit_update_error:
-                    logger.error(f"Failed to update credits: {credit_update_error}")
-                    traceback.print_exc()
-
-                    # Update webhook log with error
-                    supabase.table("webhook_logs").update({
-                        "status": "error",
-                        "error": str(credit_update_error)
-                    }).eq("id", webhook_log["id"]).execute()
-
-                    return {
-                        "success": False,
-                        "error": f"Failed to update credits: {str(credit_update_error)}",
-                        "event_type": event_type
-                    }
-            else:
-                logger.info(f"Ignoring {event_type} - order not paid yet (status: {order_status}, paid: {is_paid})")
-                return {"success": True, "message": f"Ignored {event_type} - order not paid yet"}
-
-        elif event_type == "order.created":
-            order_data = payload.get("data", {})
-            order_id = order_data.get("id")
-            logger.info(f"Order created: {order_id}")
-
-            # Update webhook log
-            supabase.table("webhook_logs").update({
-                "status": "processed",
-                "message": f"Order created: {order_id}"
-            }).eq("id", webhook_log["id"]).execute()
-
-        elif event_type == "order.failed":
-            order_data = payload.get("data", {})
-            order_id = order_data.get("id")
-            logger.warning(f"Payment failed for order: {order_id}")
-
-            # Create failed transaction record
-            transaction_id = str(uuid.uuid4())
-            transaction_data = {
-                "id": transaction_id,
-                "order_id": order_id,
-                "amount": order_data.get("amount", 0),
-                "type": "credit_purchase",
-                "status": "failed",
-                "description": f"Payment failed for order {order_id}",
-                "created_at": datetime.utcnow().isoformat()
-            }
-            supabase.table("transactions").insert(transaction_data).execute()
-
-            # Update webhook log
-            supabase.table("webhook_logs").update({
-                "status": "processed",
-                "message": f"Order failed: {order_id}"
-            }).eq("id", webhook_log["id"]).execute()
-
-        else:
-            logger.info(f"Unhandled event type: {event_type}")
-            supabase.table("webhook_logs").update({
-                "status": "ignored",
-                "message": f"Unhandled event type: {event_type}"
-            }).eq("id", webhook_log["id"]).execute()
-
-        return {"success": True, "message": f"Webhook processed: {event_type}"}
-
-    except Exception as webhook_error:
-        logger.error(f"Webhook processing error: {webhook_error}")
-        traceback.print_exc()
-
-        # Log the error
-        error_log = {
-            "id": str(uuid.uuid4()),
-            "error": str(webhook_error),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        supabase.table("webhook_errors").insert(error_log).execute()
-
-        return JSONResponse(
-            status_code=200,  # Return 200 to prevent Polar.sh from retrying
-            content={"success": False, "error": str(webhook_error)}
-        )
-
-@app.get("/api/payments/webhook/debug")
-async def webhook_debug():
-    try:
-        response = supabase.table("transactions")\
-            .select("*")\
-            .order("created_at", desc=True)\
-            .limit(10)\
-            .execute()
-
-        return {
-            "success": True,
-            "transactions": response.data,
-            "webhook_secret_configured": bool(POLAR_WEBHOOK_SECRET),
-            "test_mode": ENABLE_TEST_MODE,
-            "polar_server": POLAR_SERVER
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@app.post("/api/payments/add-test-credits")
-async def add_test_credits(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
-        if DEMO_MODE and current_user.email == "demo@octavia.com":
-            data = await request.json()
-            credits = data.get("credits", 100)
-            return {
-                "success": True,
-                "message": f"Test credits added successfully (demo mode)",
-                "credits_added": credits,
-                "new_balance": 5000
-            }
-        if not ENABLE_TEST_MODE:
-            raise HTTPException(400, "Test mode is disabled")
-
-        data = await request.json()
-        credits = data.get("credits", 100)
-
-        if credits <= 0:
-            raise HTTPException(400, "Credits must be positive")
-
-        new_balance = add_user_credits(
-            current_user.id,
-            credits,
-            f"Test credits added: {credits}"
-        )
-
-        return {
-            "success": True,
-            "message": f"Test credits added successfully",
-            "credits_added": credits,
-            "new_balance": new_balance
-        }
-
-    except HTTPException:
-        raise
-    except Exception as credit_error:
-        logger.error(f"Failed to add test credits: {credit_error}")
-        raise HTTPException(500, "Failed to add test credits")
-
-@app.post("/api/payments/manual-complete")
-async def manual_complete_payment(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Manually complete a payment for testing when webhooks aren't working.
-    """
-    try:
-        data = await request.json()
-        session_id = data.get("session_id")
-        package_id = data.get("package_id")
-
-        if not session_id or not package_id:
-            raise HTTPException(400, "session_id and package_id required")
-
-        # Find the transaction
-        response = supabase.table("transactions").select("*").eq("session_id", session_id).execute()
-
-        if not response.data:
-            raise HTTPException(404, "Transaction not found")
-
-        transaction = response.data[0]
-
-        # Get package info
-        package = CREDIT_PACKAGES.get(package_id)
-        if not package:
-            raise HTTPException(400, "Invalid package")
-
-        # Add credits
-        new_balance = add_user_credits(
-            current_user.id,
-            package["credits"],
-            f"Manual completion: {package['name']}"
-        )
-
-        # Update transaction
-        update_transaction_status(
-            transaction["id"],
-            "completed",
-            f"Manually completed: {package['name']}"
-        )
-
-        return {
-            "success": True,
-            "message": f"Manually added {package['credits']} credits",
-            "new_balance": new_balance,
-            "transaction_id": transaction["id"]
-        }
-
-    except Exception as e:
-        logger.error(f"Manual completion error: {e}")
-        raise HTTPException(500, str(e))
-
-@app.post("/api/payments/force-complete-all")
-async def force_complete_all_payments():
-    """
-    EMERGENCY ENDPOINT: Force complete all pending payments
-    """
-    try:
-        # Get all pending transactions
-        response = supabase.table("transactions").select("*").eq("status", "pending").execute()
-
-        if not response.data:
-            return {"success": True, "message": "No pending transactions found"}
-
-        completed = []
-        failed = []
-
-        for transaction in response.data:
-            try:
-                user_id = transaction["user_id"]
-                package_id = transaction.get("package_id")
-
-                if not package_id:
-                    # Try to guess package from amount
-                    amount = transaction.get("amount", 999)
-                    credits_to_add = 100 if amount == 999 else 250 if amount == 1999 else 500
-                else:
-                    package = CREDIT_PACKAGES.get(package_id)
-                    if not package:
-                        failed.append(f"Invalid package: {package_id}")
-                        continue
-                    credits_to_add = package["credits"]
-
-                # Update user credits
-                supabase.table("users").update({"credits": transaction.get("current_credits", 0) + credits_to_add}).eq("id", user_id).execute()
-
-                # Mark transaction as completed
-                supabase.table("transactions").update({
-                    "status": "completed",
-                    "description": "FORCE COMPLETED: Added credits",
-                    "updated_at": datetime.utcnow().isoformat()
-                }).eq("id", transaction["id"]).execute()
-
-                completed.append(f"Transaction {transaction['id']}: {credits_to_add} credits")
-
-            except Exception as tx_error:
-                failed.append(f"Transaction {transaction['id']}: {str(tx_error)}")
-
-        return {
-            "success": True,
-            "completed": completed,
-            "failed": failed,
-            "message": f"Force completed {len(completed)} transactions"
-        }
-
-    except Exception as e:
-        logger.error(f"Force complete error: {e}")
-        return {"success": False, "error": str(e)}
-
-@app.get("/api/payments/fix-pending")
-async def fix_pending_payments():
-    """
-    Quick fix: Direct SQL to update all pending transactions
-    """
-    try:
-        # First, get all pending transactions with their user info
-        response = supabase.table("transactions").select("*, users!inner(credits)").eq("status", "pending").execute()
-
-        for tx in response.data:
-            user_id = tx["user_id"]
-            package_id = tx.get("package_id")
-
-            # Determine credits to add
-            if package_id in CREDIT_PACKAGES:
-                credits_to_add = CREDIT_PACKAGES[package_id]["credits"]
-            else:
-                # Default based on amount
-                amount = tx.get("amount", 999)
-                credits_to_add = 100 if amount == 999 else 250 if amount == 1999 else 500
-
-            # Update user credits
-            supabase.table("users").update({"credits": tx["users"]["credits"] + credits_to_add}).eq("id", user_id).execute()
-
-            # Update transaction
-            supabase.table("transactions").update({
-                "status": "completed",
-                "description": "Fixed by system",
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", tx["id"]).execute()
-
-        return {"success": True, "message": "Fixed all pending transactions"}
-
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@app.get("/api/payments/transactions")
-async def get_user_transactions(
-    current_user: User = Depends(get_current_user),
-    limit: int = 20,
-    offset: int = 0
-):
-    """Get transaction history for the current user"""
-    try:
-        response = supabase.table("transactions") \
-            .select("*") \
-            .eq("user_id", current_user.id) \
-            .order("created_at", desc=True) \
-            .range(offset, offset + limit - 1) \
-            .execute()
-
-        transactions = []
-        for tx in response.data:
-            transactions.append({
-                "id": tx.get("id"),
-                "type": tx.get("type"),
-                "status": tx.get("status"),
-                "description": tx.get("description"),
-                "credits": tx.get("credits", 0),
-                "amount": tx.get("amount", 0),
-                "created_at": tx.get("created_at"),
-                "updated_at": tx.get("updated_at")
-            })
-
-        # Get total count for pagination
-        count_response = supabase.table("transactions") \
-            .select("id", count="exact") \
-            .eq("user_id", current_user.id) \
-            .execute()
-
-        total_count = count_response.count or 0
-
-        return {
-            "success": True,
-            "transactions": transactions,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total": total_count
-            }
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get transactions: {e}")
-        raise HTTPException(500, "Failed to retrieve transaction history")
 
 
 #  generate audio from subtitles
 async def generate_audio_from_subtitles(subtitle_content: str, language: str, voice: str, output_format: str = "mp3"):
     """Generate audio from subtitle text using gTTS"""
     try:
+        logger.info(f"Starting audio generation for language: {language}, voice: {voice}, format: {output_format}")
+        logger.info(f"Subtitle content length: {len(subtitle_content)} characters")
         # Parse SRT content
         subtitles = []
         lines = subtitle_content.strip().split('\n')
-        
+
+        logger.info(f"Parsing {len(lines)} lines of subtitle content")
+
         current_subtitle = {}
-        for line in lines:
+        for i, line in enumerate(lines):
             line = line.strip()
             if not line:
+                if current_subtitle and 'text' in current_subtitle:
+                    subtitles.append(current_subtitle.copy())
+                    current_subtitle = {}
                 continue
-            
-            # Check if line is a number (subtitle index)
-            if line.isdigit() and 'start' not in current_subtitle:
-                current_subtitle = {'index': int(line)}
-            
-            # Check if line contains timestamp
-            elif '-->' in line and 'start' not in current_subtitle:
-                start_end = line.split('-->')
-                if len(start_end) == 2:
-                    start_str, end_str = start_end
-                    
-                    # Parse SRT timestamp to seconds
-                    def parse_srt_time(timestamp):
-                        time_part, millis_part = timestamp.split(',')
-                        h, m, s = time_part.split(':')
-                        hours = int(h)
-                        minutes = int(m)
-                        seconds = int(s)
-                        milliseconds = int(millis_part)
-                        return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
-                    
-                    current_subtitle['start'] = parse_srt_time(start_str.strip())
-                    current_subtitle['end'] = parse_srt_time(end_str.strip())
-                    current_subtitle['duration'] = current_subtitle['end'] - current_subtitle['start']
-            
-            # Text content
-            elif 'start' in current_subtitle and 'text' not in current_subtitle:
-                current_subtitle['text'] = line
-                subtitles.append(current_subtitle.copy())
-                current_subtitle = {}
-        
-        logger.info(f"Parsed {len(subtitles)} subtitle segments")
-        
-        # Generate audio for each subtitle using gTTS
-        audio_segments = []
-        
-        for i, subtitle in enumerate(subtitles):
-            text = subtitle.get('text', '').strip()
-            if not text:
-                continue
-            
+
             try:
-                logger.info(f"Generating TTS for subtitle {i+1}/{len(subtitles)}: '{text[:50]}...'")
-                
-                # Use gTTS - much more reliable than edge-tts
-                lang_code = language[:2].lower()
-                
-                # Handle language codes for gTTS
-                lang_map = {
-                    'en': 'en',
-                    'es': 'es',
-                    'fr': 'fr',
-                    'de': 'de',
-                    'it': 'it',
-                    'pt': 'pt',
-                    'ru': 'ru',
-                    'ja': 'ja',
-                    'ko': 'ko',
-                    'zh': 'zh-cn',
-                    'ar': 'ar',
-                    'hi': 'hi'
+                # Check if line is a number (subtitle index)
+                if line.isdigit() and 'start' not in current_subtitle:
+                    current_subtitle = {'index': int(line)}
+                    logger.debug(f"Found subtitle index: {line}")
+
+                # Check if line contains timestamp
+                elif '-->' in line:
+                    start_end = line.split('-->')
+                    if len(start_end) == 2:
+                        start_str, end_str = start_end
+
+                        # Parse SRT timestamp to seconds
+                        def parse_srt_time(timestamp):
+                            timestamp = timestamp.strip()
+                            if ',' not in timestamp:
+                                # Handle formats without milliseconds
+                                parts = timestamp.split(':')
+                                if len(parts) == 3:
+                                    h, m, s = parts
+                                    return int(h) * 3600 + int(m) * 60 + float(s)
+                                return 0
+
+                            time_part, millis_part = timestamp.split(',')
+                            h, m, s = time_part.split(':')
+                            hours = int(h)
+                            minutes = int(m)
+                            seconds = int(s)
+                            milliseconds = int(millis_part)
+                            return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+
+                        current_subtitle['start'] = parse_srt_time(start_str)
+                        current_subtitle['end'] = parse_srt_time(end_str)
+                        current_subtitle['duration'] = max(0.1, current_subtitle['end'] - current_subtitle['start'])  # Minimum 0.1s
+                        logger.debug(f"Parsed timestamp: {start_str} --> {end_str}")
+
+                # Text content (only if we have parsed start/end)
+                elif 'start' in current_subtitle and 'text' not in current_subtitle:
+                    current_subtitle['text'] = line
+                    logger.debug(f"Found text: '{line[:50]}...'")
+
+            except Exception as parse_error:
+                logger.warning(f"Error parsing line {i}: '{line}' - {parse_error}")
+                continue
+
+        # Add the last subtitle if it exists
+        if current_subtitle and 'text' in current_subtitle:
+            subtitles.append(current_subtitle.copy())
+
+        logger.info(f"Successfully parsed {len(subtitles)} subtitle segments")
+
+        if not subtitles:
+            raise Exception("No valid subtitle segments found. Please check the SRT file format.")
+        
+        # Generate audio for subtitles using parallel processing
+        import asyncio
+        import concurrent.futures
+        from functools import partial
+
+        async def generate_audio_parallel():
+            """Generate audio for all subtitles concurrently"""
+            audio_segments = []
+
+            # Prepare TTS tasks
+            tts_tasks = []
+            for i, subtitle in enumerate(subtitles):
+                text = subtitle.get('text', '').strip()
+                if not text:
+                    continue
+
+                # Validate and clean text
+                text = text.strip()
+                if len(text) > 500:
+                    text = text[:500] + "..."
+
+                task = {
+                    'index': i,
+                    'text': text,
+                    'start_time': subtitle['start'] * 1000,
+                    'target_duration_ms': int(subtitle['duration'] * 1000)
                 }
-                
-                gtts_lang = lang_map.get(lang_code, 'en')
-                
-                tts = gTTS(text=text, lang=gtts_lang, slow=False)
-                
-                # Save to BytesIO
-                audio_bytes = io.BytesIO()
-                tts.write_to_fp(audio_bytes)
-                audio_bytes.seek(0)
-                
-                # Load audio
-                segment = AudioSegment.from_file(audio_bytes, format="mp3")
-                
-                # Calculate target duration in milliseconds
-                target_duration_ms = int(subtitle['duration'] * 1000)
-                
-                # Adjust segment to match subtitle duration
-                if len(segment) < target_duration_ms:
-                    # Add silence at the end
-                    silence = AudioSegment.silent(duration=target_duration_ms - len(segment))
-                    segment = segment + silence
-                elif len(segment) > target_duration_ms:
-                    # Speed up slightly
-                    speed_factor = len(segment) / target_duration_ms
-                    if speed_factor > 1.5:
-                        speed_factor = 1.5  # Don't speed up too much
-                    segment = segment.speedup(playback_speed=speed_factor, chunk_size=150, crossfade=25)
-                
-                audio_segments.append((subtitle['start'] * 1000, segment))
-                logger.info(f"Generated audio for subtitle {i+1}: {len(segment)}ms")
-                
-            except Exception as tts_error:
-                logger.error(f"TTS failed for subtitle {i}: {tts_error}")
-                # Add silent segment as fallback
-                silence = AudioSegment.silent(duration=int(subtitle['duration'] * 1000))
-                audio_segments.append((subtitle['start'] * 1000, silence))
-                logger.info(f"✓ Added silent segment for subtitle {i+1}")
+                tts_tasks.append(task)
+
+            logger.info(f"Starting parallel TTS generation for {len(tts_tasks)} subtitles")
+
+            # Process TTS in parallel batches
+            batch_size = 5  # Process 5 TTS calls concurrently
+            semaphore = asyncio.Semaphore(batch_size)
+
+            async def process_single_tts(task):
+                async with semaphore:
+                    i = task['index']
+                    text = task['text']
+                    start_time = task['start_time']
+                    target_duration_ms = task['target_duration_ms']
+
+                    try:
+                        logger.debug(f"Processing TTS for subtitle {i+1}: '{text[:30]}...'")
+
+                        # Use AudioTranslator's TTS methods
+                        from modules.audio_translator import AudioTranslator, TranslationConfig
+                        config = TranslationConfig(source_lang=language, target_lang=language)
+                        translator = AudioTranslator(config)
+
+                        temp_output_path = f"temp_tts_{i}_{uuid.uuid4()}.wav"
+
+                        # Try TTS methods (will run in thread pool to avoid blocking)
+                        loop = asyncio.get_event_loop()
+                        try:
+                            # Try Edge TTS first
+                            success, _ = await loop.run_in_executor(
+                                None,
+                                partial(translator._edge_tts_synthesis, text, [], temp_output_path)
+                            )
+
+                            if not success or not os.path.exists(temp_output_path):
+                                logger.debug(f"Edge TTS failed for subtitle {i+1}, trying gTTS")
+                                # Fallback to gTTS
+                                success, _ = await loop.run_in_executor(
+                                    None,
+                                    partial(translator._fallback_gtts_synthesis, text, [], temp_output_path)
+                                )
+
+                            if not success or not os.path.exists(temp_output_path):
+                                raise Exception("All TTS methods failed")
+
+                            # Load audio (in thread pool)
+                            segment = await loop.run_in_executor(
+                                None, AudioSegment.from_file, temp_output_path, "wav"
+                            )
+
+                        finally:
+                            # Clean up temp file
+                            if os.path.exists(temp_output_path):
+                                try:
+                                    os.remove(temp_output_path)
+                                except:
+                                    pass
+
+                        # Adjust duration (in thread pool to avoid blocking)
+                        if len(segment) < target_duration_ms:
+                            silence = AudioSegment.silent(duration=target_duration_ms - len(segment))
+                            segment = segment + silence
+                        elif len(segment) > target_duration_ms:
+                            speed_factor = min(len(segment) / target_duration_ms, 1.5)
+                            segment = await loop.run_in_executor(
+                                None,
+                                lambda: segment.speedup(playback_speed=speed_factor, chunk_size=150, crossfade=25)
+                            )
+
+                        logger.debug(f"Completed TTS for subtitle {i+1}: {len(segment)}ms")
+                        return (start_time, segment)
+
+                    except Exception as e:
+                        logger.warning(f"TTS failed for subtitle {i+1}: {e}")
+                        # Return silent segment as fallback
+                        silence = AudioSegment.silent(duration=target_duration_ms)
+                        return (start_time, silence)
+
+            # Execute all TTS tasks concurrently
+            tasks = [process_single_tts(task) for task in tts_tasks]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Task {i} failed with exception: {result}")
+                    # Add fallback silent segment
+                    task = tts_tasks[i]
+                    silence = AudioSegment.silent(duration=task['target_duration_ms'])
+                    audio_segments.append((task['start_time'], silence))
+                else:
+                    audio_segments.append(result)
+
+            # Sort by start time
+            audio_segments.sort(key=lambda x: x[0])
+
+            logger.info(f"Parallel TTS generation completed: {len(audio_segments)} segments")
+            return audio_segments
+
+        # Run parallel audio generation
+        audio_segments = asyncio.run(generate_audio_parallel())
         
         # Combine all audio segments
         if not audio_segments:
@@ -3280,7 +2960,10 @@ async def generate_audio_from_subtitles(subtitle_content: str, language: str, vo
         
     except Exception as e:
         logger.error(f" Audio generation failed: {e}")
-        traceback.print_exc()
+        logger.error(f"Subtitle content preview: {subtitle_content[:200]}...")
+        logger.error(f"Language: {language}, Voice: {voice}, Format: {output_format}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise
 
 # Add this endpoint to app.py (after subtitle translation endpoints)
@@ -3423,57 +3106,91 @@ async def process_subtitle_to_audio_job(
                 subtitle_jobs[job_id]["progress"] = 40
                 logger.info(f"Starting translation using {'direct' if direct_translator else 'pivot'} method")
 
-                # Parse and translate SRT content
+                # Parse and translate SRT content with batch processing
                 if file_path.lower().endswith('.srt'):
-                    logger.info("Parsing SRT file for translation")
+                    logger.info("Parsing SRT file for batch translation")
                     subs = pysrt.open(file_path)
 
-                    translated_subs = []
-
+                    # Extract texts for batch processing
+                    subtitle_texts = []
+                    subtitle_indices = []
                     for i, sub in enumerate(subs):
-                        original_text = sub.text.strip()
-                        logger.info(f"Translating subtitle {i+1}: '{original_text[:50]}...'")
+                        text = sub.text.strip()
+                        if text:  # Only process non-empty subtitles
+                            subtitle_texts.append(text)
+                            subtitle_indices.append((i, sub))
 
-                        if not original_text:
-                            translated_text = ""
-                        else:
-                            # Use Helsinki NLP for translation
-                            try:
-                                if direct_translator:
-                                    # Direct translation
-                                    logger.info(f"Using direct translation {source_language}->{target_language}")
-                                    translated = direct_translator(original_text, max_length=512)
-                                    translated_text = translated[0]['translation_text']
-                                    logger.info(f"Direct translation result: '{translated_text[:50]}...'")
-                                else:
-                                    # Two-step translation via English pivot
-                                    logger.info(f"Using pivot translation {source_language}->en->{target_language}")
-                                    source_to_en = get_translator(source_language, "en")
-                                    en_to_target = get_translator("en", target_language)
+                    logger.info(f"Found {len(subtitle_texts)} non-empty subtitles for translation")
 
-                                    to_english = source_to_en(original_text, max_length=512)
-                                    english_text = to_english[0]['translation_text']
-                                    logger.info(f"Step 1 ({source_language}->en): '{english_text[:50]}...'")
+                    # Batch translate subtitles for better performance
+                    translated_texts = []
+                    batch_size = 10  # Process 10 subtitles at a time
 
-                                    from_english = en_to_target(english_text, max_length=512)
-                                    translated_text = from_english[0]['translation_text']
-                                    logger.info(f"Step 2 (en->{target_language}): '{translated_text[:50]}...'")
+                    for batch_start in range(0, len(subtitle_texts), batch_size):
+                        batch_end = min(batch_start + batch_size, len(subtitle_texts))
+                        batch_texts = subtitle_texts[batch_start:batch_end]
 
-                            except Exception as trans_error:
-                                logger.error(f"Translation error for segment {i}: {trans_error}")
-                                # Fallback: mark as untranslated
-                                translated_text = f"[{target_language.upper()}] {original_text}"
-                                logger.info(f"Using fallback text: '{translated_text[:50]}...'")
+                        logger.info(f"Translating batch {batch_start//batch_size + 1}: subtitles {batch_start + 1}-{batch_end}")
 
-                        # Create new subtitle with translated text
-                        if translated_text:
-                            translated_sub = pysrt.SubRipItem(
+                        try:
+                            if direct_translator:
+                                # Direct batch translation
+                                logger.debug(f"Using direct batch translation {source_language}->{target_language}")
+                                # Combine texts with separator for batch processing
+                                combined_text = " ||| ".join(batch_texts)
+                                translated_batch = direct_translator(combined_text, max_length=512 * len(batch_texts))
+                                # Split back into individual translations
+                                batch_results = translated_batch[0]['translation_text'].split(" ||| ")
+                                translated_texts.extend(batch_results[:len(batch_texts)])  # Ensure we don't exceed batch size
+
+                            else:
+                                # Two-step batch translation via English pivot
+                                logger.debug(f"Using pivot batch translation {source_language}->en->{target_language}")
+                                source_to_en = get_translator(source_language, "en")
+                                en_to_target = get_translator("en", target_language)
+
+                                # Step 1: Source to English
+                                combined_text = " ||| ".join(batch_texts)
+                                to_english_batch = source_to_en(combined_text, max_length=512 * len(batch_texts))
+                                english_batch = to_english_batch[0]['translation_text'].split(" ||| ")
+
+                                # Step 2: English to Target
+                                combined_english = " ||| ".join(english_batch[:len(batch_texts)])
+                                from_english_batch = en_to_target(combined_english, max_length=512 * len(batch_texts))
+                                final_batch = from_english_batch[0]['translation_text'].split(" ||| ")
+                                translated_texts.extend(final_batch[:len(batch_texts)])
+
+                        except Exception as batch_error:
+                            logger.warning(f"Batch translation failed for subtitles {batch_start + 1}-{batch_end}: {batch_error}")
+                            # Fallback: translate individually for failed batch
+                            for j, text in enumerate(batch_texts):
+                                try:
+                                    if direct_translator:
+                                        translated = direct_translator(text, max_length=512)
+                                        translated_texts.append(translated[0]['translation_text'])
+                                    else:
+                                        # Individual pivot translation
+                                        to_english = source_to_en(text, max_length=512)
+                                        english_text = to_english[0]['translation_text']
+                                        from_english = en_to_target(english_text, max_length=512)
+                                        translated_texts.append(from_english[0]['translation_text'])
+                                except Exception as individual_error:
+                                    logger.error(f"Individual translation failed for subtitle {batch_start + j + 1}: {individual_error}")
+                                    translated_texts.append(f"[{target_language.upper()}] {text}")
+
+                    # Reconstruct subtitles with translated text
+                    translated_subs = []
+                    text_idx = 0
+                    for i, sub in subtitle_indices:
+                        if text_idx < len(translated_texts):
+                            translated_text = translated_texts[text_idx]
+                            translated_subs.append(pysrt.SubRipItem(
                                 index=sub.index,
                                 start=sub.start,
                                 end=sub.end,
                                 text=translated_text
-                            )
-                            translated_subs.append(translated_sub)
+                            ))
+                            text_idx += 1
 
                     # Create translated SRT content
                     translated_content = ""
@@ -3529,19 +3246,23 @@ async def process_subtitle_to_audio_job(
                 pass
             
     except Exception as e:
+        logger.error(f"Subtitle-to-audio job {job_id} failed: {str(e)}")
+        logger.exception(f"Full traceback for job {job_id}:")
         subtitle_jobs[job_id].update({
             "status": "failed",
             "error": str(e),
             "failed_at": datetime.utcnow().isoformat()
         })
-        
+
         # Refund credits on failure
         try:
             response = supabase.table("users").select("credits").eq("id", user_id).execute()
             if response.data:
                 current_credits = response.data[0]["credits"]
                 supabase.table("users").update({"credits": current_credits + 5}).eq("id", user_id).execute()
-                logger.info(f"Refunded 5 credits to user {user_id} due to subtitle-to-audio failure")
+                logger.info(f"Refunded 5 credits to user {user_id} due to subtitle-to-audio failure: {str(e)}")
+        except Exception as refund_error:
+            logger.error(f"Failed to refund credits: {refund_error}")
         except Exception as refund_error:
             logger.error(f"Failed to refund credits: {refund_error}")
         
@@ -3666,11 +3387,41 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
             except:
                 pass
 
-# Stub for _download_subtitle_audio_helper to prevent NameError
+# Download subtitle audio file
 async def _download_subtitle_audio_helper(job_id, current_user):
-    # TODO: Implement actual subtitle audio download logic
-    logger.info(f"Stub: _download_subtitle_audio_helper called for job_id={job_id}")
-    return JSONResponse({"success": True, "job_id": job_id, "message": "Download not implemented (stub)"})
+    """Download generated subtitle audio file"""
+    logger.info(f"Downloading subtitle audio for job_id={job_id}")
+
+    if job_id not in subtitle_jobs:
+        raise HTTPException(404, "Job not found")
+
+    job = subtitle_jobs[job_id]
+
+    if job["user_id"] != current_user.id:
+        raise HTTPException(403, "Access denied")
+
+    if job["status"] != "completed":
+        raise HTTPException(400, "Job not completed yet")
+
+    audio_filename = job.get("filename")
+    if not audio_filename:
+        raise HTTPException(404, "Audio file not found")
+
+    audio_path = os.path.join("outputs", audio_filename)
+
+    if not os.path.exists(audio_path):
+        raise HTTPException(404, "Audio file not found on disk")
+
+    # Stream the file back to client
+    def iterfile():
+        with open(audio_path, 'rb') as f:
+            yield from f
+
+    return FileResponse(
+        audio_path,
+        media_type=f'audio/{job.get("format", "mp3")}',
+        filename=f"subtitle_audio_{job_id[:8]}.{job.get('format', 'mp3')}"
+    )
 
 # ========== ROOT ENDPOINT ==========
 

@@ -3,10 +3,12 @@
 import { motion } from "framer-motion";
 import { Plus, Mic, Play, MoreVertical, Trash2, Edit2, Globe, Volume2 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useUser } from "@/contexts/UserContext";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function MyVoicesPage() {
+    const { user, refreshCredits } = useUser();
     const [voices, setVoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedVoice, setSelectedVoice] = useState(null);
@@ -126,11 +128,19 @@ export default function MyVoicesPage() {
     const handlePreviewVoice = async (voice) => {
         try {
             setSelectedVoice(voice);
+
+            // Check if user has enough credits (1 credit per preview)
+            if ((user?.credits || 0) < 1) {
+                alert(`Insufficient credits. You need 1 credit but only have ${user?.credits || 0}.`);
+                return;
+            }
+
             setIsPlayingPreview(true);
-            
+
             const token = getToken();
             if (!token) {
                 alert("Please log in to preview voices");
+                setIsPlayingPreview(false);
                 return;
             }
 
@@ -148,35 +158,97 @@ export default function MyVoicesPage() {
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || "Preview generation failed");
+                const errorText = await response.text();
+                console.error('Preview API error:', response.status, errorText);
+                try {
+                    const errorData = JSON.parse(errorText);
+                    throw new Error(errorData.error || errorData.detail || "Preview generation failed");
+                } catch {
+                    throw new Error(`Preview generation failed (Status: ${response.status})`);
+                }
             }
 
             const data = await response.json();
-            
+
             if (data.success && data.preview_url) {
                 // Create audio element and play
                 const audioUrl = `${API_BASE_URL}${data.preview_url}`;
+                console.log("Audio URL:", audioUrl);
                 const audio = new Audio(audioUrl);
-                
+
+                audio.onloadedmetadata = () => {
+                    console.log("Audio metadata loaded:", audio.duration, "seconds");
+                };
+
+                audio.onloadeddata = () => {
+                    console.log("Audio data loaded");
+                };
+
+                audio.oncanplay = () => {
+                    console.log("Audio can play");
+                };
+
                 audio.onended = () => {
+                    console.log("Audio playback ended");
                     setIsPlayingPreview(false);
                 };
-                
-                audio.onerror = () => {
+
+                audio.onerror = (e) => {
+                    console.error("Audio error:", e);
+                    console.error("Audio error code:", audio.error?.code);
+                    console.error("Audio error message:", audio.error?.message);
                     setIsPlayingPreview(false);
-                    alert("Failed to play preview audio");
+
+                    let errorMsg = "Failed to play preview audio";
+                    if (audio.error?.message) {
+                        errorMsg += `: ${audio.error.message}`;
+                    } else if (audio.error?.code === 4) {
+                        errorMsg = "Audio file format error. The voice preview service may be temporarily unavailable. Please try again later.";
+                    } else if (audio.error?.code === 3) {
+                        errorMsg = "Audio decoding error. Please try a different voice.";
+                    } else if (audio.error?.code === 2) {
+                        errorMsg = "Network error loading audio. Please check your connection.";
+                    }
+
+                    alert(errorMsg);
                 };
-                
+
                 setAudioElement(audio);
-                audio.play();
-                
-                console.log("Preview credits remaining:", data.remaining_credits);
+                audio.play().catch((err) => {
+                    console.error("Failed to play audio:", err);
+                    setIsPlayingPreview(false);
+                    alert(`Failed to play audio: ${err.message}`);
+                });
+
+                console.log("Preview credits remaining:", data.credits_remaining);
+
+                // Refresh credits after preview
+                refreshCredits();
             }
         } catch (error) {
             console.error("Preview error:", error);
-            alert(`Preview failed: ${error.message}`);
             setIsPlayingPreview(false);
+
+            const errorMessage = error.message || "Unknown error";
+
+            // Show detailed error message
+            if (errorMessage.includes("Voice preview service is currently unavailable")) {
+                alert(
+                    "Voice Preview Service Unavailable\n\n" +
+                    "The Microsoft TTS service is experiencing connectivity issues.\n" +
+                    "Please try again later or use the Subtitle-to-Audio feature which uses a different TTS service."
+                );
+            } else if (errorMessage.includes("No audio data received")) {
+                alert(
+                    "Audio Generation Failed\n\n" +
+                    "No audio was generated from the TTS service.\n" +
+                    "This may be a network issue. Please try again."
+                );
+            } else if (errorMessage.includes("Not enough credits")) {
+                alert(errorMessage);
+            } else {
+                alert(`Preview failed: ${errorMessage}`);
+            }
         }
     };
 
@@ -218,6 +290,13 @@ export default function MyVoicesPage() {
                     <p className="text-slate-400 text-sm">Preview and manage available AI voices</p>
                 </div>
                 <div className="flex items-center gap-4">
+                    <div className="glass-card px-4 py-2">
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-primary-purple-bright animate-pulse"></div>
+                            <span className="text-white text-sm">Credits: <span className="font-bold">{user?.credits || 0}</span></span>
+                        </div>
+                        <p className="text-slate-400 text-xs mt-1">1 credit per preview</p>
+                    </div>
                     <div className="text-sm text-slate-400">
                         {isLoading ? "Loading..." : `${voices.length} voices available`}
                     </div>

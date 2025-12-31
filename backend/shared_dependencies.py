@@ -111,9 +111,10 @@ def verify_token(token: str):
     except JWTError:
         return None
 
-async def get_current_user(token: str = Depends(HTTPBearer())):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     """Get current user from JWT token"""
-    payload = verify_token(token.credentials)
+    token = credentials.credentials
+    payload = verify_token(token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -128,17 +129,15 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             detail="Invalid authentication credentials",
         )
 
-    # DEMO_MODE: return static demo user if token matches
+    # DEMO_MODE: return static demo user if enabled
     DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
     print(f"DEBUG: DEMO_MODE={DEMO_MODE}, user_id={user_id}")
-    
-    # Accept both the UUID and the old 'demo-user-id' to handle stale tokens
-    valid_demo_ids = ["550e8400-e29b-41d4-a716-446655440000", "demo-user-id"]
-    
-    if DEMO_MODE and (user_id in valid_demo_ids):
+
+    if DEMO_MODE:
+        # In demo mode, return static demo user for any valid token
         print("DEBUG: Using demo user")
         return User(
-            id=user_id, # Keep the ID from the token
+            id=user_id,
             email="demo@octavia.com",
             name="Demo User",
             is_verified=True,
@@ -146,13 +145,7 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             created_at=datetime.utcnow()
         )
 
-    if supabase is None:
-        print("Error: Supabase client is not initialized")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable",
-        )
-
+    # Normal mode: fetch user from Supabase
     try:
         response = supabase.table("users").select("*").eq("id", user_id).execute()
         if not response.data:
@@ -170,6 +163,8 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
             credits=user_data["credits"],
             created_at=user_data["created_at"]
         )
+    except HTTPException:
+        raise
     except Exception as db_error:
         print(f"Database error: {db_error}")
         raise HTTPException(

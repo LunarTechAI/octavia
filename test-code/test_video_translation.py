@@ -27,14 +27,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def test_video_translation():
+def test_video_translation(video_path=None, target_lang=None, output_dir=None):
     """Test video translation pipeline"""
     print("=" * 60)
     print("OCTAVIA VIDEO TRANSLATION TEST")
     print("=" * 60)
 
-    # Test video path
-    test_video_path = "translated_output_rus.mp4"
+    # Use provided parameters or defaults
+    test_video_path = video_path or "backend/test_samples/sample_30s_en.mp4"
+    target_language = target_lang or "de"
+    test_output_dir = output_dir or "backend/test_outputs"
 
     # Check if test video exists
     if not os.path.exists(test_video_path):
@@ -72,17 +74,16 @@ def test_video_translation():
         chunk_size=30,  # 30 second chunks
         use_gpu=False,  # Use CPU for testing
         temp_dir="/tmp/octavia_test",
-        output_dir="backend/outputs"
+        output_dir=test_output_dir
     )
 
     pipeline = VideoTranslationPipeline(config)
 
-    # Test target language
-    target_language = "es"  # Spanish
     print(f"🎯 Target Language: {target_language}")
+    print(f"📁 Output Directory: {test_output_dir}")
 
     # Create test job tracking (simulate job_id)
-    test_job_id = "test_job_001"
+    test_job_id = f"test_job_{os.path.basename(test_video_path)}_{target_language}"
     print(f"📋 Test Job ID: {test_job_id}")
 
     print("\n📊 Starting Video Translation Process...")
@@ -176,6 +177,15 @@ def test_video_translation():
 
 def main():
     """Main test function"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Test video translation pipeline")
+    parser.add_argument("--video", help="Video file path")
+    parser.add_argument("--lang", help="Target language")
+    parser.add_argument("--output", help="Output directory")
+
+    args = parser.parse_args()
+
     print(f"Python version: {sys.version}")
     print(f"Working directory: {os.getcwd()}")
     print(f"Backend directory: {backend_dir}")
@@ -210,21 +220,48 @@ def main():
     except ImportError:
         print("❌ PyDub not available")
 
-    # Run the test
-    print("\n" + "=" * 60)
-    success = test_video_translation()
+    # Run tests
+    print("\n" + "=" * 80)
+    print("RUNNING VIDEO TRANSLATION TESTS")
+    print("=" * 80)
 
-    print("\n" + "=" * 60)
-    if success:
-        print("🎉 TEST PASSED: Video translation pipeline is working!")
+    # Test 1: English to German
+    print("\n" + "🔵" * 80)
+    print("TEST 1: English -> German")
+    print("🔵" * 80)
+    success1 = test_video_translation(
+        video_path="backend/test_samples/sample_30s_en.mp4",
+        target_lang="de",
+        output_dir="backend/test_outputs"
+    )
+
+    # Test 2: Russian to English
+    print("\n" + "🟡" * 80)
+    print("TEST 2: Russian -> English")
+    print("🟡" * 80)
+    success2 = test_video_translation(
+        video_path="backend/test_samples/sample_30s_ru.mp4",
+        target_lang="en",
+        output_dir="backend/test_outputs"
+    )
+
+    print("\n" + "=" * 80)
+    print("FINAL RESULTS:")
+    print("=" * 80)
+
+    if success1 and success2:
+        print("🎉 ALL TESTS PASSED: Video translation pipeline is working!")
         print("✅ Ready for integration into the main application")
+        print("\nTranslated videos saved to: backend/test_outputs/")
+        return 0
     else:
-        print("💥 TEST FAILED: Video translation pipeline needs fixes")
+        print("💥 SOME TESTS FAILED: Video translation pipeline needs fixes")
         print("❌ Please check the logs and fix issues before integration")
-
-    print("=" * 60)
-
-    return 0 if success else 1
+        if not success1:
+            print("  - English -> German test failed")
+        if not success2:
+            print("  - Russian -> English test failed")
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())

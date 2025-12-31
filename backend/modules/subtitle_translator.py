@@ -34,9 +34,18 @@ class SubtitleTranslator:
         if file_ext not in self.supported_formats:
             raise ValueError(f"Unsupported file format. Supported: {self.supported_formats}")
 
-        # Convert language names to codes
-        source_code = self.supported_languages.get(source_lang.lower(), 'auto')
-        target_code = self.supported_languages.get(target_lang.lower(), 'en')
+        # Convert language names to codes and validate
+        source_lang_lower = source_lang.lower()
+        target_lang_lower = target_lang.lower()
+
+        # Validate target language (must be supported)
+        if target_lang_lower not in self.supported_languages:
+            supported_list = ', '.join(sorted(set([k for k in self.supported_languages.keys() if len(k) <= 10])))
+            raise ValueError(f"Unsupported target language: '{target_lang}'. Supported languages: {supported_list}")
+
+        # Get language codes
+        source_code = self.supported_languages.get(source_lang_lower, 'auto')
+        target_code = self.supported_languages[target_lang_lower]
 
         # Load subtitles
         if file_ext == '.srt':

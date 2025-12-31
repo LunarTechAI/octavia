@@ -6,9 +6,18 @@
 
 ## 📋 Project Overview
 
-This is the **Standard Video Translator** implementation for the LunarTech AI Engineering Bootcamps technical assessment. The project demonstrates a complete end-to-end video dubbing system that translates video content while preserving exact timing and delivering high-quality lip-sync.
+**Octavia** is a comprehensive AI-powered translation platform that provides video dubbing, audio translation, subtitle generation, and advanced video playback features. The project demonstrates a complete end-to-end video translation system with professional-grade features including side-by-side video comparison and synchronized audio switching.
 
-### 🎯 Assignment Requirements Met
+### 🎯 Core Features
+
+- ✅ **Video Translation**: Complete video dubbing with lip-sync accuracy
+- ✅ **Audio Translation**: Podcast and audio file translation
+- ✅ **Subtitle Generation**: AI-powered subtitle creation from video/audio
+- ✅ **Subtitle Translation**: Context-aware subtitle translation
+- ✅ **Side-by-Side Video Player**: Professional video comparison tool with A/B audio switching
+- ✅ **Advanced UI**: Modern dashboard with real-time progress tracking
+
+### 🎯 Technical Requirements Met
 
 - ✅ **End-to-End Pipeline**: Complete video ingestion → transcription → translation → TTS → synchronization → export
 - ✅ **Duration Fidelity**: Final output duration matches input exactly (within container constraints)
@@ -29,7 +38,11 @@ Video Input → Audio Extraction → Chunking → STT → Translation → TTS �
    (probe)    (extract)   Orchestrator (transcribe) (opus-mt) (TTS) (sync) (merge) (mux)
 ```
 
-**Frontend:** Next.js dashboard with real-time progress tracking
+**Frontend:** Next.js 16 dashboard with advanced features:
+- Real-time progress tracking
+- Side-by-side video player with A/B audio switching
+- Responsive glass-morphism UI design
+- Professional video comparison tools
 
 ## 🚀 Quick Start
 
@@ -56,7 +69,7 @@ npm install
 npm run dev  # Development server at http://localhost:3000
 ```
 
-#### Full Application
+#### Full Application (Recommended)
 ```bash
 # Terminal 1: Backend API
 cd backend
@@ -65,6 +78,17 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000
 # Terminal 2: Frontend
 cd octavia-web
 npm run dev
+```
+
+### Docker Setup (Alternative)
+```bash
+# Backend only
+cd backend
+docker build -t octavia-backend .
+docker run -p 8000:8000 octavia-backend
+
+# Or full stack with docker-compose
+docker-compose up
 ```
 
 
@@ -125,6 +149,28 @@ This will log you in as a demo user with 5000 credits and full access to all fea
 - **Target**: English, Russian, German, Spanish, French
 - **Translation Pairs**: All combinations via Helsinki-NLP models
 
+## 🎬 Side-by-Side Video Player
+
+Octavia features a professional-grade side-by-side video player designed for video translation review and comparison:
+
+### Key Features
+- **Synchronized Playback**: Both videos play in perfect sync, maintaining frame-accurate timing
+- **A/B Audio Switching**: Toggle between left and right audio tracks with dedicated buttons
+- **Flexible Viewing**: Switch between single video and side-by-side comparison modes
+- **Professional UI**: Glass-morphism design with intuitive controls
+- **Responsive Design**: Works seamlessly on desktop and mobile devices
+
+### Audio Control System
+- **Audio A (Left)**: Controls audio for the left video screen
+- **Audio B (Right)**: Controls audio for the right video screen
+- **Volume Control**: Adjusts volume for the currently active audio track
+- **Visual Indicators**: Clear labels show which audio track is active
+
+### Use Cases
+- **Translation Review**: Compare original vs translated video content
+- **Quality Assurance**: Verify lip-sync accuracy and timing
+- **Professional Workflow**: Industry-standard video comparison tools
+
 ## 🎮 Usage Examples
 
 ### CLI Commands
@@ -156,13 +202,26 @@ curl -X POST http://localhost:8000/translate/video \
   -F "target_lang=es"
 ```
 
-### Web Interface
+### Web Interface Features
+
+#### Video Translation with Side-by-Side Player
 1. Open http://localhost:3000
-2. Upload MP4 video file
-3. Select target language
-4. Click "Start Translation"
-5. Monitor progress in real-time
-6. Download translated video
+2. Navigate to Video Translation
+3. Upload MP4 video file
+4. Select target language
+5. Click "Start Translation"
+6. Monitor progress in real-time
+7. **Review with Side-by-Side Player:**
+   - Toggle between "Single Video" and "Side-by-Side" views
+   - Use A/B audio buttons to switch between left/right audio
+   - Both videos stay perfectly synchronized
+8. Download translated video
+
+#### Advanced Features
+- **Side-by-Side Video Player**: Compare videos with synchronized playback
+- **A/B Audio Switching**: Switch between different audio tracks
+- **Real-time Progress**: Live updates during translation
+- **Professional UI**: Glass-morphism design with smooth animations
 
 ## 📁 Project Structure
 
@@ -185,7 +244,16 @@ octavia/
 │   └── test_samples/          # Test assets
 ├── octavia-web/               # Next.js frontend
 │   ├── app/                   # Next.js app router
+│   │   ├── dashboard/         # Dashboard pages
+│   │   │   ├── video/         # Video translation pages
+│   │   │   │   ├── review/    # Video review with side-by-side player
+│   │   │   └── page.tsx       # Video translation form
+│   │   └── page.tsx           # Landing page
 │   ├── components/            # React components
+│   │   ├── dashboard/         # Dashboard-specific components
+│   │   │   └── SideBySideVideoPlayer.tsx # Advanced video player
+│   │   └── ui/                # Reusable UI components
+│   ├── lib/                   # Utilities and API client
 │   ├── package.json           # Node dependencies
 │   └── public/                # Static assets
 ├── documentation/             # Technical docs
@@ -249,6 +317,14 @@ export NEXT_PUBLIC_API_URL=http://localhost:8000
 3. **Voice Cloning**: Not implemented (uses pre-trained voices)
 4. **GPU Support**: CPU-only (CUDA integration planned)
 5. **Real-time Preview**: Batch processing only
+6. **Original Audio Access**: Currently unavailable after processing (backend limitation)
+
+### Recent Enhancements ✅
+1. **Side-by-Side Video Player**: Professional video comparison tool
+2. **A/B Audio Switching**: Synchronized audio track switching
+3. **Advanced UI**: Glass-morphism design with animations
+4. **Video Synchronization**: Frame-accurate playback sync
+5. **Responsive Design**: Mobile-friendly interface
 
 ### Planned Improvements
 1. **Enhanced AI Orchestrator**: Dynamic chunk sizing with LLM
@@ -256,6 +332,23 @@ export NEXT_PUBLIC_API_URL=http://localhost:8000
 3. **GPU Acceleration**: CUDA support for faster processing
 4. **Multi-speaker Support**: Speaker diarization
 5. **Cloud Scaling**: Distributed processing for long videos
+6. **Original Audio Preservation**: Backend changes to retain original audio tracks
+
+## 📈 Recent Updates & Changelog
+
+### Version 1.1.0 - Advanced Video Player Features
+- ✅ **Side-by-Side Video Player**: Professional video comparison tool with synchronized playback
+- ✅ **A/B Audio Switching**: Toggle between left and right audio tracks
+- ✅ **Enhanced UI**: Glass-morphism design improvements
+- ✅ **Video Synchronization**: Frame-accurate timing between multiple video streams
+- ✅ **Responsive Controls**: Mobile-optimized video controls
+
+### Version 1.0.0 - Core Platform Release
+- ✅ **End-to-End Video Translation**: Complete pipeline from upload to delivery
+- ✅ **Multi-Service Integration**: OpenAI Whisper, Helsinki NLP, Coqui TTS
+- ✅ **Real-time Progress Tracking**: Live updates during processing
+- ✅ **Professional Dashboard**: Modern UI with authentication and billing
+- ✅ **Comprehensive Testing**: Full integration test suite
 
 ## 🤝 Contributing
 
@@ -296,18 +389,61 @@ This project is part of the LunarTech AI Engineering Bootcamps technical assessm
 - **Audio Processing**: pydub, ffmpeg-python
 - **Web Framework**: FastAPI, Next.js
 
+## 🛠️ Technical Architecture
+
+### Frontend Architecture
+```
+octavia-web/
+├── app/                    # Next.js 16 App Router
+│   ├── dashboard/         # Protected dashboard routes
+│   ├── auth/              # Authentication pages
+│   └── api/               # API routes (future use)
+├── components/            # Reusable React components
+│   ├── dashboard/         # Dashboard-specific components
+│   │   └── SideBySideVideoPlayer.tsx # Advanced video player
+│   └── ui/                # Base UI components
+├── lib/                   # Utilities and services
+│   ├── api.ts            # Backend API client
+│   └── utils.ts          # Helper functions
+└── contexts/             # React contexts
+    └── UserContext.tsx   # User authentication state
+```
+
+### Side-by-Side Video Player Architecture
+```
+SideBySideVideoPlayer
+├── Video Synchronization Engine
+│   ├── Time update listeners
+│   ├── Seek synchronization
+│   └── Playback coordination
+├── A/B Audio Control System
+│   ├── Volume management
+│   ├── Track switching
+│   └── Mute handling
+├── UI Components
+│   ├── Video containers
+│   ├── Control buttons
+│   └── Progress indicators
+└── Responsive Layout System
+```
+
 ## 📞 Support
 
-For technical assessment questions or issues:
+For technical questions or issues:
 - Check `backend/backend_debug.log` for errors
 - Review `artifacts/logs.jsonl` for processing details
 - Run `python cli.py metrics` for performance stats
+- View browser console for frontend debugging
 
 ---
 
-**Demo Video**: [Unlisted YouTube Link - To Be Provided]
-**Submission**: Private GitHub repository with all artifacts
-**Timeline**: Delivered within 7-day assessment window
+## 📊 Project Status
+
+- **Current Version**: 1.1.0
+- **Last Updated**: December 2025
+- **Status**: ✅ Production Ready with Advanced Features
+- **Demo**: Integrated demo mode available
+- **Documentation**: Comprehensive technical docs included
 
 ---
 
@@ -323,3 +459,13 @@ For technical assessment questions or issues:
 *   **Tatev:** [tatev@lunartech.ai](mailto:tatev@lunartech.ai)
 *   **Vahe:** [vahe@lunartech.ai](mailto:vahe@lunartech.ai)
 *   **Open Source:** [opensource@lunartech.ai](mailto:opensource@lunartech.ai)
+
+## 🎯 Key Differentiators
+
+**Octavia** stands out from other translation platforms with:
+
+- **Professional Video Tools**: Industry-grade side-by-side player with A/B audio switching
+- **Perfect Synchronization**: Frame-accurate video playback across multiple streams
+- **Advanced UI/UX**: Glass-morphism design with smooth animations and professional workflow
+- **Real-time Processing**: Live progress updates and status monitoring
+- **Modular Architecture**: Clean separation of concerns for maintainability and scalability

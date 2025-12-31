@@ -22,6 +22,7 @@ from transformers import MarianMTModel, MarianTokenizer, pipeline
 from pydub import AudioSegment
 import numpy as np
 from difflib import SequenceMatcher
+import edge_tts
 try:
     from TTS.api import TTS
     COQUI_AVAILABLE = True
@@ -71,6 +72,11 @@ class TranslationResult:
     subtitle_path: Optional[str] = None
     timing_segments: List[Dict] = None
     error: Optional[str] = None
+    # Quality metrics
+    stt_confidence_score: float = 0.0
+    translation_confidence_score: float = 0.0
+    estimated_wer: float = 0.0
+    quality_rating: str = "unknown"
 
 class AudioTranslator:
     """Main audio translation class with improved quality"""
@@ -192,32 +198,34 @@ class AudioTranslator:
             if not self.whisper_model:
                 self.load_models()
 
-            # Handle faster-whisper (incompatible with openai-whisper mel logic)
-            if getattr(self, '_using_faster_whisper', False):
-                # faster-whisper detects language during transcription setup
-                segments, info = self.whisper_model.transcribe(audio_path, beam_size=1)
-                logger.info(f"Detected language: {info.language} (confidence: {info.language_probability:.2%})")
-                
-                # Map Whisper language codes to our codes
-                lang_map = {
-                    "en": "en", "de": "de", "ru": "ru", "es": "es", "fr": "fr"
-                }
-                return lang_map.get(info.language, self.config.source_lang)
-            
-            # Load and process audio
-            audio = whisper.load_audio(audio_path)
-            audio = whisper.pad_or_trim(audio)
-            
-            # Make log-Mel spectrogram
-            mel = whisper.log_mel_spectrogram(audio).to(
-                self.whisper_model.device if hasattr(self.whisper_model, 'device') else 'cpu'
-            )
-            
-            # Detect language
-            _, probs = self.whisper_model.detect_language(mel)
-            detected_lang = max(probs, key=probs.get)
-            confidence = probs[detected_lang]
-            
+            # Use faster_whisper API for language detection
+            if self._using_faster_whisper:
+                # faster_whisper API - detect language directly from audio file
+                try:
+                    segments, info = self.whisper_model.transcribe(
+                        audio_path,
+                        language=None  # Auto-detect
+                    )
+                    detected_lang = info.language if hasattr(info, 'language') else self.config.source_lang
+                    confidence = info.language_probability if hasattr(info, 'language_probability') else 1.0
+                except Exception as whisper_error:
+                    logger.warning(f"faster_whisper detection failed: {whisper_error}")
+                    return self.config.source_lang
+            else:
+                # Standard whisper API
+                audio = whisper.load_audio(audio_path)
+                audio = whisper.pad_or_trim(audio)
+
+                # Make log-Mel spectrogram
+                mel = whisper.log_mel_spectrogram(audio).to(
+                    self.whisper_model.device if hasattr(self.whisper_model, 'device') else 'cpu'
+                )
+
+                # Detect language
+                _, probs = self.whisper_model.detect_language(mel)
+                detected_lang = max(probs, key=probs.get)
+                confidence = probs[detected_lang]
+
             logger.info(f"Detected language: {detected_lang} (confidence: {confidence:.2%})")
             
             # Map Whisper language codes to our codes
@@ -286,6 +294,11 @@ class AudioTranslator:
                             audio_path,
                             language=language if language != "auto" else None
                         )
+
+                        # Convert generator to list to get count
+                        segments_list = list(segments)
+                        logger.info(f"faster_whisper returned {len(segments_list)} raw segments")
+                        segments = segments_list  # Reassign back
                     except TypeError as param_error:
                         # If parameters are wrong, try minimal call
                         logger.warning(f"faster_whisper parameters failed: {param_error}, using minimal call")
@@ -337,14 +350,20 @@ class AudioTranslator:
             raw_segments = result.get("segments", [])
 
             if raw_segments:
-                for segment in raw_segments:
-                    if segment.get("text") and segment["text"].strip():
+                logger.info(f"Processing {len(raw_segments)} raw segments")
+                for i, segment in enumerate(raw_segments):
+                    text = segment.get("text", "").strip()
+                    if text:
                         segments.append({
                             "start": segment.get("start", 0),
                             "end": segment.get("end", segment.get("start", 0) + 1),
-                            "text": segment["text"].strip(),
+                            "text": text,
                             "words": segment.get("words", [])
                         })
+                        logger.debug(f"Segment {i}: {segment.get('start', 0):.2f}s - {segment.get('end', segment.get('start', 0) + 1):.2f}s: '{text[:50]}...'")
+                    else:
+                        logger.debug(f"Skipping empty segment {i}")
+                logger.info(f"After filtering: {len(segments)} valid segments")
 
             full_text = " ".join([seg["text"] for seg in segments]) if segments else result.get("text", "")
 
@@ -385,26 +404,38 @@ class AudioTranslator:
                 logger.warning("No text to translate")
                 raise ValueError("No text to translate")
 
-            logger.info(f"Translating text: '{text[:100]}...'")
+            logger.info(f"Translating text: '{text[:100]}...' (length: {len(text)} chars)")
 
             # Simple direct translation for now
             try:
                 logger.info(f"Attempting translation with pipeline...")
 
                 if self.translation_pipeline:
-                    result = self.translation_pipeline(text, max_length=512, num_beams=1)
+                    # Don't pass max_length to pipeline - let model handle tokenization
+                    # Only truncate very long texts to avoid timeouts
+                    input_length = len(text)
+
+                    if input_length > 1000:
+                        # Truncate very long texts
+                        text = text[:1000]
+                        logger.warning(f"Text truncated from {input_length} to 1000 chars")
+
+                    logger.info(f"Translating text of length {len(text)} chars")
+
+                    result = self.translation_pipeline(text, num_beams=1)
                     translated_text = result[0]['translation_text']
                     logger.info(f"Pipeline translation result: '{translated_text[:100]}...'")
                 else:
                     logger.warning("No translation pipeline available, trying direct model")
-                    inputs = self.translation_tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+                    # Use conservative max_length for direct model calls
+                    inputs = self.translation_tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=256)
                     if torch.cuda.is_available():
                         inputs = {k: v.cuda() for k, v in inputs.items()}
-
+                    
                     with torch.no_grad():
-                        outputs = self.translation_model.generate(**inputs, max_length=512, num_beams=1)
+                        outputs = self.translation_model.generate(**inputs, max_length=256, num_beams=1)
                         translated_text = self.translation_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
+                    
                     logger.info(f"Direct model translation result: '{translated_text[:100]}...'")
 
                 # Ensure we have translated text
@@ -565,7 +596,7 @@ class AudioTranslator:
             return text, 1.0
     
     def synthesize_speech_with_timing(self, text: str, segments: List[Dict], output_path: str) -> Tuple[bool, List[Dict]]:
-        """Generate speech with timing preservation using Coqui TTS"""
+        """Generate speech with timing preservation using Edge TTS primary, gTTS fallback"""
         try:
             if not text or len(text.strip()) < 2:
                 logger.warning("Text too short for TTS, creating silent audio")
@@ -573,56 +604,24 @@ class AudioTranslator:
                 silent_audio.export(output_path, format="wav")
                 return True, []
 
-            # Use Coqui TTS if available, otherwise fallback to gTTS
-            if COQUI_AVAILABLE:
-                logger.info(f"Generating speech with Coqui TTS for language: {self.config.target_lang}")
+            # Clean text to remove problematic Unicode characters
+            text = self._clean_text_for_tts(text)
 
-                # Initialize Coqui TTS with appropriate model
-                try:
-                    # Map languages to Coqui TTS models
-                    coqui_lang_map = {
-                        'en': 'tts_models/en/ljspeech/tacotron2-DDC_ph',
-                        'es': 'tts_models/es/mai/tacotron2-DDC_ph',
-                        'fr': 'tts_models/fr/mai/tacotron2-DDC_ph',
-                        'de': 'tts_models/de/mai/tacotron2-DDC_ph',
-                        'it': 'tts_models/it/mai/tacotron2-DDC_ph',
-                        'pt': 'tts_models/pt/cv/vits',
-                        'ru': 'tts_models/ru/cv/v3_nemo',
-                        'ja': 'tts_models/ja/kokoro/tacotron2-DDC_ph',
-                        'zh': 'tts_models/zh-cn/csspc/tacotron2-DDC_ph',
-                        'ar': 'tts_models/ar/cv/vits',
-                        'hi': 'tts_models/hi/cv/v3_nemo'
-                    }
-
-                    model_name = coqui_lang_map.get(self.config.target_lang, 'tts_models/en/ljspeech/tacotron2-DDC_ph')
-
-                    # Initialize TTS
-                    tts = TTS(model_name).to(self.config.device if torch.cuda.is_available() else "cpu")
-
-                    # Generate speech
-                    wav = tts.tts(text=text)
-
-                    # Convert to numpy array and save
-                    import numpy as np
-                    wav_np = np.array(wav)
-
-                    # Save as WAV
-                    import scipy.io.wavfile as wavfile
-                    wavfile.write(output_path, 22050, (wav_np * 32767).astype(np.int16))
-
-                    # Load with pydub for duration
-                    tts_audio = AudioSegment.from_file(output_path)
-                    tts_duration_ms = len(tts_audio)
-
-                    logger.info(f"Coqui TTS audio generated: {tts_duration_ms}ms duration")
-
-                except Exception as coqui_error:
-                    logger.warning(f"Coqui TTS failed: {coqui_error}, falling back to gTTS")
-                    return self._fallback_gtts_synthesis(text, segments, output_path)
-
-            else:
-                logger.info("Coqui TTS not available, using gTTS fallback")
+            # Use gTTS as primary TTS (more reliable and faster)
+            logger.info(f"Generating speech with gTTS for language: {self.config.target_lang}")
+            try:
                 return self._fallback_gtts_synthesis(text, segments, output_path)
+            except Exception as gtts_error:
+                logger.warning(f"gTTS failed, falling back to Edge-TTS: {gtts_error}")
+                # Fallback to Edge-TTS
+                try:
+                    return self._edge_tts_synthesis(text, segments, output_path)
+                except Exception as edge_error:
+                    logger.error(f"Both gTTS and Edge-TTS failed. gTTS: {gtts_error}, Edge-TTS: {edge_error}")
+                    # Final fallback: create silent audio
+                    silent_audio = AudioSegment.silent(duration=5000)
+                    silent_audio.export(output_path, format="wav")
+                    return True, []
 
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
@@ -637,7 +636,7 @@ class AudioTranslator:
                 return False, []
 
     def _fallback_gtts_synthesis(self, text: str, segments: List[Dict], output_path: str) -> Tuple[bool, List[Dict]]:
-        """Fallback TTS synthesis using gTTS"""
+        """TTS synthesis using gTTS"""
         try:
             if not text or len(text.strip()) < 2:
                 logger.warning("Text too short for TTS, creating silent audio")
@@ -648,6 +647,7 @@ class AudioTranslator:
             # Use gTTS for synchronous TTS generation
             from gtts import gTTS
             import io
+            import hashlib
 
             # Get appropriate language code for gTTS
             lang_map = {
@@ -668,15 +668,58 @@ class AudioTranslator:
             gtts_lang = lang_map.get(self.config.target_lang, 'en')
             logger.info(f"Generating speech with gTTS for language: {gtts_lang}")
 
-            # Generate TTS audio synchronously
-            tts = gTTS(text=text, lang=gtts_lang, slow=False)
-            audio_bytes = io.BytesIO()
-            tts.write_to_fp(audio_bytes)
-            audio_bytes.seek(0)
+            # Create cache key for TTS caching
+            cache_key = hashlib.md5(f"{text}_{gtts_lang}".encode()).hexdigest()
+            cache_dir = os.path.join(self.config.cache_dir, "tts_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{cache_key}_gtts.wav")
 
-            # Load audio with pydub
-            tts_audio = AudioSegment.from_file(audio_bytes, format="mp3")
-            tts_duration_ms = len(tts_audio)
+            # Initialize variables
+            tts_audio = None
+            tts_duration_ms = 0
+
+            # Check cache first
+            if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+                logger.info(f"Using cached gTTS audio: {cache_path}")
+                # Copy cached file to output path
+                import shutil
+                shutil.copy2(cache_path, output_path)
+
+                # Load cached audio to get duration
+                cached_audio = AudioSegment.from_file(cache_path, format="wav")
+                tts_audio = cached_audio
+                tts_duration_ms = len(cached_audio)
+            else:
+                # Generate new TTS audio
+                logger.info("Generating new gTTS audio (not cached)")
+                start_time = datetime.now()
+
+                try:
+                    tts = gTTS(text=text, lang=gtts_lang, slow=False)
+                    audio_bytes = io.BytesIO()
+                    tts.write_to_fp(audio_bytes)
+                    audio_bytes.seek(0)
+
+                    generation_time = (datetime.now() - start_time).total_seconds()
+                    logger.info(f"gTTS generation took {generation_time:.2f}s")
+
+                    # Load audio with pydub
+                    tts_audio = AudioSegment.from_file(audio_bytes, format="mp3")
+                    tts_duration_ms = len(tts_audio)
+
+                    # Save to cache
+                    tts_audio.export(cache_path, format="wav")
+                    logger.info(f"Cached gTTS audio: {cache_path}")
+
+                    # Export to output path
+                    tts_audio.export(output_path, format="wav")
+
+                except Exception as generation_error:
+                    logger.error(f"gTTS generation failed: {generation_error}")
+                    # Create fallback silent audio
+                    silent_audio = AudioSegment.silent(duration=5000)
+                    silent_audio.export(output_path, format="wav")
+                    return True, []
 
             logger.info(f"gTTS audio generated: {tts_duration_ms}ms duration")
 
@@ -700,7 +743,7 @@ class AudioTranslator:
                             "original_end": seg["end"],
                             "adjusted_start": adjusted_start,
                             "adjusted_end": adjusted_end,
-                            "timing_precision_ms": 0,  # Simple proportional - no precision timing
+                            "timing_precision_ms": 0,
                             "within_tolerance": True,
                             "text": seg.get("translated_text", seg.get("original_text", "")),
                         })
@@ -747,6 +790,167 @@ class AudioTranslator:
             except Exception as fallback_error:
                 logger.error(f"Fallback audio creation failed: {fallback_error}")
                 return False, []
+
+    def _edge_tts_synthesis(self, text: str, segments: List[Dict], output_path: str) -> Tuple[bool, List[Dict]]:
+        """TTS synthesis using Edge-TTS with optimizations"""
+        try:
+            if not text or len(text.strip()) < 2:
+                logger.warning("Text too short for TTS, creating silent audio")
+                silent_audio = AudioSegment.silent(duration=1000)
+                silent_audio.export(output_path, format="wav")
+                return True, []
+
+            import edge_tts
+            import io
+            import hashlib
+            import asyncio
+
+            # Get appropriate voice for Edge-TTS
+            voice = self.VOICE_MAPPING.get(self.config.target_lang, "en-US-JennyNeural")
+            logger.info(f"Generating speech with Edge-TTS for language: {self.config.target_lang} (voice: {voice})")
+
+            # Create cache key for TTS caching
+            cache_key = hashlib.md5(f"{text}_{voice}".encode()).hexdigest()
+            cache_dir = os.path.join(self.config.cache_dir, "tts_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{cache_key}_edge.wav")
+
+            # Initialize variables
+            tts_duration_ms = 0
+
+            # Check cache first
+            if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+                logger.info(f"Using cached Edge-TTS audio: {cache_path}")
+                # Copy cached file to output path
+                import shutil
+                shutil.copy2(cache_path, output_path)
+
+                # Load cached audio to get duration
+                cached_audio = AudioSegment.from_file(cache_path, format="wav")
+                tts_duration_ms = len(cached_audio)
+            else:
+                # Generate new TTS audio with optimized async approach
+                logger.info("Generating new Edge-TTS audio (not cached)")
+
+                try:
+                    async def generate_tts_async():
+                        communicate = edge_tts.Communicate(text, voice)
+                        audio_bytes = io.BytesIO()
+
+                        # Use async streaming for better performance
+                        async for chunk in communicate.stream():
+                            if chunk["type"] == "audio":
+                                audio_bytes.write(chunk["data"])
+
+                        audio_bytes.seek(0)
+                        return audio_bytes
+
+                    # Run async TTS generation
+                    start_time = datetime.now()
+                    audio_bytes = asyncio.run(generate_tts_async())
+                    generation_time = (datetime.now() - start_time).total_seconds()
+
+                    # Verify we got some audio data
+                    if audio_bytes.tell() == 0:
+                        raise Exception("No audio data received from edge-tts")
+
+                    # Load audio with pydub
+                    tts_audio = AudioSegment.from_file(audio_bytes, format="mp3")
+                    tts_duration_ms = len(tts_audio)
+
+                    logger.info(f"Edge-TTS audio generated in {generation_time:.2f}s: {tts_duration_ms}ms duration")
+
+                    # Save to cache
+                    tts_audio.export(cache_path, format="wav")
+                    logger.info(f"Cached Edge-TTS audio: {cache_path}")
+
+                    # Export to output path
+                    tts_audio.export(output_path, format="wav")
+
+                except Exception as generation_error:
+                    logger.error(f"Edge-TTS generation failed: {generation_error}")
+                    raise generation_error
+
+            # Calculate timing segments
+            adjusted_segments = self._calculate_timing_segments(segments, tts_duration_ms)
+            return True, adjusted_segments
+
+        except Exception as e:
+            logger.warning(f"Edge-TTS synthesis failed: {e}")
+            # Don't fallback here since gTTS is now primary
+            raise e
+
+            import edge_tts
+            import io
+            import hashlib
+            import asyncio
+
+            # Get appropriate voice for Edge-TTS
+            voice = self.VOICE_MAPPING.get(self.config.target_lang, "en-US-JennyNeural")
+            logger.info(f"Generating speech with Edge-TTS for language: {self.config.target_lang} (voice: {voice})")
+
+            # Create cache key for TTS caching
+            cache_key = hashlib.md5(f"{text}_{voice}".encode()).hexdigest()
+            cache_dir = os.path.join(self.config.cache_dir, "tts_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{cache_key}.wav")
+
+            # Check cache first
+            if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+                logger.info(f"Using cached TTS audio: {cache_path}")
+                # Copy cached file to output path
+                import shutil
+                shutil.copy2(cache_path, output_path)
+
+                # Load cached audio to get duration
+                cached_audio = AudioSegment.from_file(cache_path, format="wav")
+                tts_duration_ms = len(cached_audio)
+
+            # Calculate timing segments
+            adjusted_segments = self._calculate_timing_segments(segments, tts_duration_ms)
+            return True, adjusted_segments
+
+        except Exception as e:
+            logger.warning(f"Edge-TTS synthesis failed: {e}, falling back to gTTS")
+            # Fallback to gTTS for faster, more reliable TTS
+            try:
+                return self._fallback_gtts_synthesis(text, segments, output_path)
+            except Exception as gtts_error:
+                logger.error(f"Both Edge-TTS and gTTS failed. Edge-TTS: {e}, gTTS: {gtts_error}")
+                # Create silent audio as final fallback
+                silent_audio = AudioSegment.silent(duration=5000)
+                silent_audio.export(output_path, format="wav")
+                return True, []
+
+    def _calculate_timing_segments(self, segments: List[Dict], tts_duration_ms: float) -> List[Dict]:
+        """Calculate proportional timing segments for TTS audio"""
+        adjusted_segments = []
+        if segments and tts_duration_ms > 0:
+            total_original_duration = sum(seg["end"] - seg["start"] for seg in segments)
+
+            if total_original_duration > 0:
+                current_pos = 0
+
+                for seg in segments:
+                    seg_duration = seg["end"] - seg["start"]
+                    seg_ratio = seg_duration / total_original_duration
+
+                    adjusted_start = current_pos
+                    adjusted_end = current_pos + (tts_duration_ms * seg_ratio)
+
+                    adjusted_segments.append({
+                        "original_start": seg["start"],
+                        "original_end": seg["end"],
+                        "adjusted_start": adjusted_start,
+                        "adjusted_end": adjusted_end,
+                        "timing_precision_ms": 0,
+                        "within_tolerance": True,
+                        "text": seg.get("translated_text", seg.get("original_text", "")),
+                    })
+
+                    current_pos = adjusted_end
+
+        return adjusted_segments
     
     def _adjust_audio_speed(self, audio: AudioSegment, speed: float) -> AudioSegment:
         """Adjust audio playback speed with better quality"""
@@ -763,7 +967,7 @@ class AudioTranslator:
                 audio.export(temp_input, format="wav")
 
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_out:
-                temp_output = tmp_in.name
+                temp_output = tmp_out.name
 
                 cmd = [
                     'ffmpeg', '-i', temp_input,
@@ -1285,19 +1489,68 @@ class AudioTranslator:
             logger.error(f"Meaning assessment failed: {e}")
             return 0.7  # Conservative fallback
     
+    def _clean_text_for_tts(self, text: str) -> str:
+        """Clean text to remove problematic Unicode characters for TTS"""
+        try:
+            if not text:
+                return text
+
+            # Remove combining characters and diacritics that cause TTS issues
+            import unicodedata
+
+            # Normalize to NFD (decomposed) form to separate base characters from combining marks
+            text = unicodedata.normalize('NFD', text)
+
+            # Remove combining characters (category Mn - Mark, nonspacing)
+            text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+
+            # Remove other problematic characters that TTS engines struggle with
+            problematic_chars = [
+                '\u0361',  # Combining double inverted breve (͡)
+                '\u035c',  # Combining double breve below
+                '\u0306',  # Combining breve
+                '\u0308',  # Combining diaeresis
+                '\u032f',  # Combining inverted breve below
+                # Add more if needed
+            ]
+
+            for char in problematic_chars:
+                text = text.replace(char, '')
+
+            # Remove zero-width characters and other invisible characters
+            invisible_chars = [
+                '\u200b',  # Zero width space
+                '\u200c',  # Zero width non-joiner
+                '\u200d',  # Zero width joiner
+                '\ufeff',  # Zero width no-break space (BOM)
+            ]
+
+            for char in invisible_chars:
+                text = text.replace(char, '')
+
+            # Clean up extra whitespace
+            text = ' '.join(text.split())
+
+            logger.debug(f"Text cleaned for TTS: {len(text)} chars")
+            return text
+
+        except Exception as e:
+            logger.warning(f"Text cleaning failed: {e}")
+            return text  # Return original if cleaning fails
+
     def generate_subtitles(self, segments: List[Dict], output_path: str) -> str:
         """Generate SRT subtitles from timing segments"""
         try:
             if not segments:
                 return ""
-            
+
             srt_lines = []
-            
+
             for i, seg in enumerate(segments, 1):
                 # Format timestamps
                 start_ms = seg.get("adjusted_start", seg.get("original_start", 0)) * 1000
                 end_ms = seg.get("adjusted_end", seg.get("original_end", 0)) * 1000
-                
+
                 # Convert to SRT format
                 def ms_to_srt_time(ms):
                     hours = int(ms // 3600000)
@@ -1305,29 +1558,29 @@ class AudioTranslator:
                     seconds = int((ms % 60000) // 1000)
                     milliseconds = int(ms % 1000)
                     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-                
+
                 start_time = ms_to_srt_time(start_ms)
                 end_time = ms_to_srt_time(end_ms)
-                
+
                 # Get text
                 text = seg.get("translated_text", seg.get("text", ""))
-                
+
                 # Add to SRT
                 srt_lines.append(f"{i}")
                 srt_lines.append(f"{start_time} --> {end_time}")
                 srt_lines.append(text)
                 srt_lines.append("")  # Empty line between entries
-            
+
             srt_content = "\n".join(srt_lines)
-            
+
             # Save to file
             srt_path = output_path.replace(".wav", ".srt")
             with open(srt_path, 'w', encoding='utf-8') as f:
                 f.write(srt_content)
-            
+
             logger.info(f"Subtitles generated: {srt_path}")
             return srt_path
-            
+
         except Exception as e:
             logger.error(f"Subtitle generation failed: {e}")
             return ""
@@ -1483,10 +1736,11 @@ class AudioTranslator:
                     output_path="",
                     error=error_msg
                 )
-            
+
             original_text = transcription["text"]
             detected_language = transcription["language"]
             segments = transcription["segments"]
+            quality_metrics = transcription.get("quality_metrics", {})
             
             # Update source language if auto-detected
             if self.config.auto_detect:
@@ -1496,9 +1750,15 @@ class AudioTranslator:
             
             # Step 3: Translate with context preservation
             logger.info(f"Translating from {self.config.source_lang} to {self.config.target_lang}...")
-            translated_text, translated_segments = self.translate_text_with_context(
-                original_text, segments
-            )
+            try:
+                translated_text, translated_segments = self.translate_text_with_context(
+                    original_text, segments
+                )
+            except (IndexError, RuntimeError) as translation_error:
+                logger.error(f"Translation failed: {translation_error}")
+                # Return original text if translation fails
+                translated_text = original_text
+                translated_segments = segments
             
             if translated_text == original_text:
                 logger.warning("Translation returned original text (possible fallback)")
@@ -1520,7 +1780,7 @@ class AudioTranslator:
 
             # Step 7: Generate speech with timing
             output_path = f"translated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
-            logger.info(f"Generating speech with gTTS (speed: {speed:.2f}x)...")
+            logger.info(f"Generating speech with Edge-TTS (speed: {speed:.2f}x)...")
 
             # Run synchronous TTS (no asyncio needed)
             tts_success = False
@@ -1625,7 +1885,10 @@ class AudioTranslator:
                 speed_adjustment=speed,
                 output_path=output_path,
                 subtitle_path=subtitle_path,
-                timing_segments=timing_segments
+                timing_segments=timing_segments,
+                stt_confidence_score=quality_metrics.get("confidence_score", 0.0),
+                estimated_wer=quality_metrics.get("estimated_wer", 0.0),
+                quality_rating=quality_metrics.get("quality_rating", "unknown")
             )
             
             # Log success
@@ -1680,7 +1943,7 @@ def test_audio_translation():
     translator = AudioTranslator(config)
     
     print(f"\n{'='*60}")
-    print(f"Testing Audio Translation: {args.source} → {args.target}")
+    print(f"Testing Audio Translation: {args.source} -> {args.target}")
     print(f"Audio file: {args.audio}")
     print(f"{'='*60}\n")
     

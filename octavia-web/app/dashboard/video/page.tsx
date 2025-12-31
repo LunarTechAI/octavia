@@ -1,11 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Upload, Video, Sparkles, CheckCircle, Rocket, Loader2, AlertCircle } from "lucide-react";
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { useUser } from "@/contexts/UserContext";
+import { api, safeApiResponse, isSuccess } from "@/lib/api";
+import { useRouter } from 'next/navigation';
 import { useToast } from "@/hooks/use-toast";
+import { Upload, Video, Rocket, Loader2, Sparkles, FileVideo, CheckCircle, AlertCircle } from "lucide-react";
 
 export default function VideoTranslationPage() {
   const [file, setFile] = useState<File | null>(null);

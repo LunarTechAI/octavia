@@ -4,8 +4,10 @@ import { motion } from "framer-motion";
 import { AudioLines, Play, Loader2, Upload, FileAudio, X, Download } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { api, ApiResponse } from "@/lib/api"; // Import your API service
+import { useUser } from "@/contexts/UserContext";
 
 export default function AudioTranslationPage() {
+  const { user, refreshCredits } = useUser();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState("auto");
@@ -16,72 +18,24 @@ export default function AudioTranslationPage() {
   const [jobStatus, setJobStatus] = useState<string>("idle");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [userCredits, setUserCredits] = useState<number>(0);
   const [processingStage, setProcessingStage] = useState<string>("idle");
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [audioPlaybackSupported, setAudioPlaybackSupported] = useState(true);
   
   // Polling interval reference
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch user credits on component mount
+  // Refresh credits when component mounts
   useEffect(() => {
-    const fetchUserCredits = async () => {
-      try {
-        const response = await api.getUserCredits();
-        console.log('Credits API response:', response);
+    refreshCredits();
 
-        // Check if we have a successful response with data
-        if (response && response.success === true && response.data && typeof response.data.credits === 'number') {
-          const credits = response.data.credits;
-          setUserCredits(credits);
-          console.log('User credits loaded:', credits);
-
-          // Auto-add test credits in development if user has 0 credits
-          if (process.env.NODE_ENV === 'development' && credits === 0) {
-            console.log('Auto-adding test credits in development mode...');
-            try {
-              const testResponse = await api.addTestCredits(100);
-              if (testResponse && testResponse.success && testResponse.data) {
-                setUserCredits(testResponse.data.new_balance || 100);
-                console.log('Test credits added automatically');
-              }
-            } catch (testError) {
-              console.warn('Failed to auto-add test credits:', testError);
-              // Still set credits to 100
-              setUserCredits(100);
-            }
-          }
-        } else {
-          // API call failed or returned invalid data
-          console.warn('Credits API failed or returned invalid data. Response:', response);
-          console.log('Setting default credits for development...');
-
-          // Always set credits to 100 in development for testing
-          if (process.env.NODE_ENV === 'development') {
-            setUserCredits(100);
-            console.log('Default test credits set: 100');
-          } else {
-            // In production, set to 0 and show an error
-            setUserCredits(0);
-            setError('Unable to load user credits. Please refresh the page or contact support.');
-          }
-        }
-      } catch (error) {
-        console.error('Exception fetching user credits:', error);
-
-        // Always provide credits in development mode
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Exception occurred, setting fallback credits: 100');
-          setUserCredits(100);
-        } else {
-          setUserCredits(0);
-          setError('Failed to load credits. Please check your connection and refresh the page.');
-        }
-      }
-    };
-
-    fetchUserCredits();
+    // Check if browser supports audio playback
+    const tempAudio = document.createElement('audio');
+    const supportsWav = tempAudio.canPlayType('audio/wav') !== '' ||
+                       tempAudio.canPlayType('audio/wave') !== '';
+    setAudioPlaybackSupported(supportsWav);
+    console.log(`Browser WAV support: ${supportsWav}`);
   }, []);
 
   // Add test credits for development
@@ -89,7 +43,7 @@ export default function AudioTranslationPage() {
     try {
       const response = await api.addTestCredits(100);
       if (response.success && response.data) {
-        setUserCredits(response.data.new_balance || userCredits + 100);
+        refreshCredits();
         setError(null);
       } else {
         setError("Failed to add test credits");
@@ -191,8 +145,8 @@ export default function AudioTranslationPage() {
     }
 
     // Check if user has enough credits (10 credits for audio translation)
-    if (userCredits < 10) {
-      setError(`Insufficient credits. You need 10 credits but only have ${userCredits}. Please purchase more credits.`);
+    if ((user?.credits || 0) < 10) {
+      setError(`Insufficient credits. You need 10 credits but only have ${user?.credits || 0}. Please purchase more credits.`);
       return;
     }
 
@@ -224,13 +178,12 @@ export default function AudioTranslationPage() {
         setProgress(30);
         setProcessingStage("transcribing");
         setJobStatus("processing");
-        
-        // Update user credits if provided
-        if (response.remaining_credits !== undefined) {
-          setUserCredits(response.remaining_credits);
-        }
-        
+
         // Start polling for job status
+        startPollingJobStatus(response.job_id);
+
+        // Refresh user credits to update the balance
+        refreshCredits();
         startPollingJobStatus(response.job_id);
       } else {
         throw new Error(response.error || response.message || "Failed to get job ID");
@@ -475,6 +428,12 @@ export default function AudioTranslationPage() {
   const handlePlayPause = async () => {
     if (!jobId) return;
 
+    // Don't attempt playback if not supported
+    if (!audioPlaybackSupported) {
+      setError("Audio playback is not supported in your browser. Please download the file instead.");
+      return;
+    }
+
     if (isPlaying && audioElement) {
       audioElement.pause();
       setIsPlaying(false);
@@ -546,8 +505,27 @@ export default function AudioTranslationPage() {
 
           console.log(`Downloaded audio blob: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
 
-          // Create an object URL from the blob
-          const audioUrl = URL.createObjectURL(audioBlob);
+          // Ensure correct MIME type for audio playback
+          // Backend generates WAV files, so set appropriate MIME type
+          let correctedBlob = audioBlob;
+          if (!audioBlob.type || !audioBlob.type.startsWith('audio/')) {
+            // Check if browser supports WAV playback
+            const tempAudio = document.createElement('audio');
+            const canPlayWav = tempAudio.canPlayType('audio/wav') !== '' ||
+                              tempAudio.canPlayType('audio/wave') !== '';
+
+            if (canPlayWav) {
+              correctedBlob = new Blob([audioBlob], { type: 'audio/wav' });
+              console.log(`Set blob type to: audio/wav`);
+            } else {
+              console.warn('Browser does not support WAV playback, audio may not play');
+              // Still try with wav type
+              correctedBlob = new Blob([audioBlob], { type: 'audio/wav' });
+            }
+          }
+
+          // Create an object URL from the corrected blob
+          const audioUrl = URL.createObjectURL(correctedBlob);
 
           const audio = new Audio(audioUrl);
 
@@ -559,6 +537,12 @@ export default function AudioTranslationPage() {
 
           audio.addEventListener('error', (e) => {
             console.error('Audio playback error:', e);
+            console.error('Audio error details:', {
+              error: (e.target as HTMLAudioElement).error,
+              src: (e.target as HTMLAudioElement).src,
+              networkState: (e.target as HTMLAudioElement).networkState,
+              readyState: (e.target as HTMLAudioElement).readyState
+            });
             const audioError = e.target as HTMLAudioElement;
             let errorMessage = "Failed to play audio. ";
 
@@ -578,12 +562,16 @@ export default function AudioTranslationPage() {
                   errorMessage += "Audio format not supported by your browser.";
                   break;
                 default:
-                  errorMessage += "Unknown playback error.";
+                  errorMessage += `Error code: ${audioError.error.code}.`;
               }
+            } else {
+              errorMessage += "Browser could not load the audio file.";
             }
 
             setError(errorMessage + " Please try downloading the file instead.");
+        setAudioPlaybackSupported(false); // Disable playback attempts
             setIsPlaying(false);
+            setAudioPlaybackSupported(false); // Disable playback for this job
 
             // Clean up the object URL
             URL.revokeObjectURL(audioUrl);
@@ -613,19 +601,26 @@ export default function AudioTranslationPage() {
 
       } catch (err: any) {
         console.error('Audio play error:', err);
+        console.error('Error details:', {
+          name: err.name,
+          message: err.message,
+          stack: err.stack
+        });
         let errorMessage = "Failed to play audio. ";
 
-        if (err.name === 'NotSupportedError') {
-          errorMessage += "Audio format not supported by your browser.";
+        if (err.name === 'NotSupportedError' || err.message?.includes('NotSupportedError')) {
+          errorMessage += "Audio format not supported by your browser. This may be due to an incompatible WAV format.";
         } else if (err.name === 'NotAllowedError') {
           errorMessage += "Playback blocked by browser. Please interact with the page first.";
+        } else if (err.message?.includes('no supported source')) {
+          errorMessage += "Audio format not recognized by your browser.";
         } else if (err.message) {
           errorMessage += err.message;
         } else {
           errorMessage += "Unknown error occurred.";
         }
 
-        setError(errorMessage + " Please try downloading the file instead.");
+        setError(errorMessage + " Please try downloading the file and playing it with a media player.");
       }
     }
   };
@@ -652,6 +647,7 @@ export default function AudioTranslationPage() {
     setDownloadUrl(null);
     setError(null);
     setIsProcessing(false);
+    setAudioPlaybackSupported(true); // Reset for new job
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -710,7 +706,7 @@ export default function AudioTranslationPage() {
           <div className="glass-card px-4 py-2">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-primary-purple-bright animate-pulse"></div>
-              <span className="text-white text-sm">Credits: <span className="font-bold">{userCredits}</span></span>
+              <span className="text-white text-sm">Credits: <span className="font-bold">{user?.credits || 0}</span></span>
             </div>
             <p className="text-slate-400 text-xs mt-1">10 credits per translation</p>
           </div>
@@ -924,28 +920,39 @@ export default function AudioTranslationPage() {
       <div className="flex flex-col sm:flex-row gap-4">
         {jobStatus === "completed" ? (
           <>
-            <button
-              onClick={handlePlayPause}
-              className="btn-border-beam w-full sm:w-auto group bg-blue-500/10 border-blue-500/30 hover:bg-blue-500/20 transition-all duration-300"
-              disabled={!downloadUrl}
-            >
-              <div className="btn-border-beam-inner flex items-center justify-center gap-2 py-4 text-base">
-                {isPlaying ? (
-                  <>
-                    <div className="w-5 h-5 flex items-center justify-center">
-                      <div className="w-1 h-4 bg-blue-400 mr-1"></div>
-                      <div className="w-1 h-4 bg-blue-400"></div>
-                    </div>
-                    <span>Pause Audio</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-5 h-5 group-hover:scale-110 transition-transform duration-300" />
-                    <span>Play Translated Audio</span>
-                  </>
-                )}
+            {audioPlaybackSupported ? (
+              <button
+                onClick={handlePlayPause}
+                className="btn-border-beam w-full sm:w-auto group bg-blue-500/10 border-blue-500/30 hover:bg-blue-500/20 transition-all duration-300"
+                disabled={!downloadUrl}
+              >
+                <div className="btn-border-beam-inner flex items-center justify-center gap-2 py-4 text-base">
+                  {isPlaying ? (
+                    <>
+                      <div className="w-5 h-5 flex items-center justify-center">
+                        <div className="w-1 h-4 bg-blue-400 mr-1"></div>
+                        <div className="w-1 h-4 bg-blue-400"></div>
+                      </div>
+                      <span>Pause Audio</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-5 h-5 group-hover:scale-110 transition-transform duration-300" />
+                      <span>Play Translated Audio</span>
+                    </>
+                  )}
+                </div>
+              </button>
+            ) : (
+              <div className="w-full sm:w-auto px-4 py-2 bg-gray-500/10 border border-gray-500/30 rounded-lg text-center">
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+                  <div className="w-4 h-4 rounded-full bg-gray-500/20 flex items-center justify-center">
+                    <span className="text-xs">!</span>
+                  </div>
+                  <span>Audio playback not supported in browser</span>
+                </div>
               </div>
-            </button>
+            )}
             <button
               onClick={handleDownload}
               className="btn-border-beam w-full sm:w-auto group bg-green-500/10 border-green-500/30 hover:bg-green-500/20 transition-all duration-300"
@@ -969,7 +976,7 @@ export default function AudioTranslationPage() {
         ) : (
           <button 
             onClick={handleUpload}
-            disabled={!selectedFile || isProcessing || userCredits < 10}
+            disabled={!selectedFile || isProcessing || (user?.credits || 0) < 10}
             className="btn-border-beam w-full group disabled:opacity-50 disabled:cursor-not-allowed bg-primary-purple/10 border-primary-purple/30 hover:bg-primary-purple/20 transition-all duration-300"
           >
             <div className="btn-border-beam-inner flex items-center justify-center gap-2 py-4 text-base">
@@ -982,8 +989,8 @@ export default function AudioTranslationPage() {
                 <>
                   <Play className="w-5 h-5 group-hover:rotate-12 transition-transform duration-300" />
                   <span>
-                    {userCredits < 10 ? 'Insufficient Credits' : 'Start Audio Translation'}
-                    {userCredits >= 10 && ` (10 credits)`}
+                    {(user?.credits || 0) < 10 ? 'Insufficient Credits' : 'Start Audio Translation'}
+                    {(user?.credits || 0) >= 10 && ` (10 credits)`}
                   </span>
                 </>
               )}
@@ -1126,7 +1133,7 @@ export default function AudioTranslationPage() {
             <div>Progress: <span className="text-gray-400">{progress}%</span></div>
             <div>Download URL: <span className="text-gray-400 truncate block">{downloadUrl || 'None'}</span></div>
             <div>Selected File: <span className="text-gray-400">{selectedFile?.name || 'None'}</span></div>
-            <div>User Credits: <span className="text-gray-400">{userCredits}</span></div>
+            <div>User Credits: <span className="text-gray-400">{user?.credits || 0}</span></div>
           </div>
           <button
             onClick={handleAddTestCredits}
