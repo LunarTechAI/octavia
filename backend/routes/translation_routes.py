@@ -39,7 +39,25 @@ import os
 router = APIRouter(prefix="/api/translate", tags=["translation"])
 
 # In-memory job tracking
-translation_jobs = {}
+TRANSLATION_JOBS_FILE = "translation_jobs.json"
+
+def load_translation_jobs():
+    if os.path.exists(TRANSLATION_JOBS_FILE):
+        try:
+            with open(TRANSLATION_JOBS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load translation jobs from file: {e}")
+    return {}
+
+def save_translation_jobs():
+    try:
+        with open(TRANSLATION_JOBS_FILE, "w", encoding="utf-8") as f:
+            json.dump(translation_jobs, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Failed to save translation jobs to file: {e}")
+
+translation_jobs = load_translation_jobs()
 
 # Timeout configuration
 JOB_TIMEOUT_SECONDS = 3600  # 1 hour max for translation jobs
@@ -107,6 +125,9 @@ def save_job_to_supabase(job_data: dict):
         supabase.table("translation_jobs").upsert(job_data, on_conflict="id").execute()
     except Exception as e:
         print(f"Warning: Failed to save job to Supabase: {e}")
+    
+    # Always save to local JSON as fallback
+    save_translation_jobs()
 
 # Helper function to load jobs from Supabase
 def load_jobs_from_supabase(user_id: str):
@@ -263,6 +284,7 @@ async def generate_subtitles(
 
         # Save to Supabase for persistence
         save_job_to_supabase(job_data)
+        save_translation_jobs()
 
         # Process in background
         background_tasks.add_task(
@@ -434,6 +456,7 @@ async def process_video_enhanced_job(job_id, file_path, target_language, chunk_s
             "output_path": output_path,
             "output_video": output_path  # Store as output_video too for consistency
         })
+        save_translation_jobs()
 
         # Cleanup temp file
         try:
@@ -457,6 +480,7 @@ async def process_video_enhanced_job(job_id, file_path, target_language, chunk_s
                 "target_language": target_language
             }
         })
+        save_translation_jobs()
 
         # Refund credits on failure
         try:
@@ -535,6 +559,7 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
             "completed_at": datetime.utcnow().isoformat(),
             "output_path": f"subtitles_{job_id}.srt" if format == "srt" else f"subtitles_{job_id}.{format}"
         })
+        save_translation_jobs()
 
         # Save the generated subtitles
         output_path = f"subtitles_{job_id}.{format}"
@@ -718,27 +743,32 @@ async def get_user_job_history(current_user: User = Depends(get_current_user)):
             })
 
     # Get jobs from jobs_db (video/audio jobs from app.py)
-    try:
-        from app import jobs_db
-        for job_id, job_data in jobs_db.items():
-            if job_data.get("user_id") == current_user.id:
-                user_jobs.append({
-                    "id": job_id,
-                    "type": job_data.get("type", "unknown"),
-                    "status": job_data.get("status", "unknown"),
-                    "progress": job_data.get("progress", 0),
-                    "file_path": job_data.get("file_path"),
-                    "target_language": job_data.get("target_language"),
-                    "original_filename": job_data.get("original_filename"),
-                    "created_at": job_data.get("created_at"),
-                    "completed_at": job_data.get("completed_at"),
-                    "result": job_data.get("result", {}),
-                    "output_path": job_data.get("output_path"),
-                    "error": job_data.get("error"),
-                    "message": job_data.get("message")
-                })
-    except ImportError:
-        pass  # jobs_db not available
+    import sys
+    app_jobs_db = {}
+    for module_name, module in sys.modules.items():
+        if (module_name in ('app', '__main__') and hasattr(module, 'jobs_db')):
+            app_jobs_db = module.jobs_db
+            break
+    
+    jobs_db_count = 0
+    for job_id, job_data in app_jobs_db.items():
+        if job_data.get("user_id") == current_user.id:
+            user_jobs.append({
+                "id": job_id,
+                "type": job_data.get("type", "unknown"),
+                "status": job_data.get("status", "unknown"),
+                "progress": job_data.get("progress", 0),
+                "file_path": job_data.get("file_path"),
+                "target_language": job_data.get("target_language"),
+                "original_filename": job_data.get("original_filename"),
+                "created_at": job_data.get("created_at"),
+                "completed_at": job_data.get("completed_at"),
+                "result": job_data.get("result", {}),
+                "output_path": job_data.get("output_path"),
+                "error": job_data.get("error"),
+                "message": job_data.get("message")
+            })
+            jobs_db_count += 1
 
     # Get jobs from Supabase (persistent storage)
     try:
@@ -764,6 +794,11 @@ async def get_user_job_history(current_user: User = Depends(get_current_user)):
     except Exception as e:
         print(f"Warning: Failed to load jobs from Supabase: {e}")
 
+    print(f"DEBUG: Job History Aggregation for {current_user.email}:")
+    print(f"  - translation_jobs (memory): {len(translation_jobs)} total, {sum(1 for j in translation_jobs.values() if j.get('user_id') == current_user.id)} for user")
+    print(f"  - jobs_db (memory): {len(app_jobs_db)} total, {jobs_db_count} for user")
+    print(f"  - Final combined count: {len(user_jobs)}")
+
     # Remove duplicates (keep Supabase versions if they exist)
     seen_ids = set()
     unique_jobs = []
@@ -777,9 +812,11 @@ async def get_user_job_history(current_user: User = Depends(get_current_user)):
     unique_jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
     return {
-        "success": True,
-        "jobs": unique_jobs,
-        "total": len(unique_jobs)
+        "success": True, 
+        "data": {
+            "jobs": unique_jobs,
+            "total": len(unique_jobs)
+        }
     }
 
 @router.post("/video")
@@ -852,6 +889,14 @@ async def translate_video(
                 "message": "Starting video translation..."
             }
             print(f"Created video job {job_id} in global jobs_db")
+            # Trigger save in app.py if possible
+            try:
+                for module_name, module in sys.modules.items():
+                    if (module_name in ('app', '__main__') and hasattr(module, 'save_jobs_db')):
+                        module.save_jobs_db()
+                        break
+            except:
+                pass
         else:
             # Fallback to local storage if jobs_db not accessible
             translation_jobs[job_id] = {
@@ -868,6 +913,7 @@ async def translate_video(
                 "message": "Starting video translation..."
             }
             print(f"Created video job {job_id} in local translation_jobs (fallback)")
+            save_translation_jobs()
 
         # Process in background
         background_tasks.add_task(
@@ -1023,6 +1069,16 @@ async def process_video_job(job_id, file_path, target_language, user_id):
                     try: os.remove(file_path)
                     except: pass
                 
+                # Persistence triggers
+                save_translation_jobs()
+                try:
+                    for module_name, module in sys.modules.items():
+                        if (module_name in ('app', '__main__') and hasattr(module, 'save_jobs_db')):
+                            module.save_jobs_db()
+                            break
+                except:
+                    pass
+                    
                 return # SUCCESS
                 
              except Exception as pipeline_error:
@@ -1081,6 +1137,16 @@ async def process_video_job(job_id, file_path, target_language, user_id):
         if os.path.exists(file_path):
             try: os.remove(file_path)
             except: pass
+            
+        # Persistence triggers
+        save_translation_jobs()
+        try:
+            for module_name, module in sys.modules.items():
+                if (module_name in ('app', '__main__') and hasattr(module, 'save_jobs_db')):
+                    module.save_jobs_db()
+                    break
+        except:
+            pass
             
         return # Exit early
 

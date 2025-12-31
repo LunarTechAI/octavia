@@ -529,7 +529,25 @@ The Octavia Team"""
         return True
 
 # In-memory storage for jobs
-jobs_db: Dict[str, Dict] = {}
+JOBS_DB_FILE = "jobs_db.json"
+
+def load_jobs_db():
+    if os.path.exists(JOBS_DB_FILE):
+        try:
+            with open(JOBS_DB_FILE, "r", encoding="utf-8") as f:
+                return _json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load jobs_db: {e}")
+    return {}
+
+def save_jobs_db():
+    try:
+        with open(JOBS_DB_FILE, "w", encoding="utf-8") as f:
+            _json.dump(jobs_db, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save jobs_db: {e}")
+
+jobs_db: Dict[str, Dict] = load_jobs_db()
 SUBTITLE_JOBS_FILE = "subtitle_jobs.json"
 def load_subtitle_jobs():
     jobs = {}
@@ -1676,6 +1694,7 @@ async def translate_video_enhanced(
             "user_id": current_user.id,
             "created_at": datetime.utcnow().isoformat()
         }
+        save_jobs_db()
         
         # Process in background
         background_tasks.add_task(
@@ -1710,6 +1729,7 @@ async def process_video_enhanced_job(job_id: str, file_path: str, target_languag
         
         # Update progress
         jobs_db[job_id]["progress"] = 30
+        save_jobs_db()
         
         # Process video
         result = pipeline.process_video(file_path, target_language)
@@ -1728,12 +1748,15 @@ async def process_video_enhanced_job(job_id: str, file_path: str, target_languag
             # os.remove(file_path)
             pass
             
+        # Ensure job is saved!
+        save_jobs_db()
     except Exception as e:
         jobs_db[job_id].update({
             "status": "failed",
             "error": str(e),
             "failed_at": datetime.utcnow().isoformat()
         })
+        save_jobs_db()
         
         # Refund credits on failure
         try:
@@ -3381,6 +3404,7 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
             "completed_at": datetime.utcnow().isoformat(),
             "output_path": result.output_path  # Use the actual output path from translator
         })
+        save_jobs_db()
 
         # Cleanup temp file
         if os.path.exists(file_path):
@@ -3397,6 +3421,7 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
                 "output_path": None
             }
         })
+        save_jobs_db()
 
         # Refund credits on failure
         try:
