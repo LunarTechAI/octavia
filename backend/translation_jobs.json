@@ -9,5 +9,185 @@
     "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
     "created_at": "2025-12-31T18:40:15.694668",
     "message": "Test job"
+  },
+  "49869ec4-50ba-487d-bdd7-9c4534bbebb0": {
+    "id": "49869ec4-50ba-487d-bdd7-9c4534bbebb0",
+    "type": "subtitles",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_665305f3-95b8-4e23-986b-2fcd18cd2d3b.mp3",
+    "language": "en",
+    "format": "srt",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T19:04:47.928861",
+    "result": {
+      "download_url": "/api/translate/download/subtitles/49869ec4-50ba-487d-bdd7-9c4534bbebb0",
+      "format": "srt",
+      "segment_count": 46,
+      "language": "en"
+    },
+    "completed_at": "2025-12-31T19:05:10.922431",
+    "output_path": "subtitles_49869ec4-50ba-487d-bdd7-9c4534bbebb0.srt"
+  },
+  "c25efaee-8020-4826-a613-680b40b3a039": {
+    "id": "c25efaee-8020-4826-a613-680b40b3a039",
+    "type": "subtitles",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_61a6acc3-30f4-4dfa-ae8d-fff626bd13ee.mp3",
+    "language": "en",
+    "format": "srt",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T19:13:05.500956",
+    "result": {
+      "download_url": "/api/translate/download/subtitles/c25efaee-8020-4826-a613-680b40b3a039",
+      "format": "srt",
+      "segment_count": 46,
+      "language": "en"
+    },
+    "completed_at": "2025-12-31T19:13:28.141549",
+    "output_path": "subtitles_c25efaee-8020-4826-a613-680b40b3a039.srt"
+  },
+  "2424430e-5b79-44ed-a4d8-5a769df4faa4": {
+    "id": "2424430e-5b79-44ed-a4d8-5a769df4faa4",
+    "type": "audio",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_28720d79-700d-4d6c-b353-08d56acfed07.mp3",
+    "source_lang": "auto",
+    "target_lang": "es",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T19:48:55.478279",
+    "message": "Starting audio translation...",
+    "result": {
+      "download_url": "/api/download/audio/2424430e-5b79-44ed-a4d8-5a769df4faa4",
+      "duration_match_percent": 58.63116007044829,
+      "speed_adjustment": 0.85
+    },
+    "completed_at": "2025-12-31T19:50:43.787282",
+    "output_path": "translated_20251231_225039.wav"
+  },
+  "e039b933-46e4-4176-80b5-6e1c2bdcf3f9": {
+    "id": "e039b933-46e4-4176-80b5-6e1c2bdcf3f9",
+    "type": "audio",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_95b9fbac-1acc-462b-a159-261d3a8cf941.mp3",
+    "source_lang": "auto",
+    "target_lang": "es",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T20:31:35.351574",
+    "message": "Starting audio translation...",
+    "result": {
+      "download_url": "/api/download/audio/e039b933-46e4-4176-80b5-6e1c2bdcf3f9",
+      "duration_match_percent": 58.63116007044829,
+      "speed_adjustment": 0.85
+    },
+    "completed_at": "2025-12-31T20:33:21.974626",
+    "output_path": "translated_20251231_233317.wav"
+  },
+  "cbeb1a33-d5d4-427f-98ab-72ff5e61b30f": {
+    "id": "cbeb1a33-d5d4-427f-98ab-72ff5e61b30f",
+    "type": "audio",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_47c02d8b-b699-4134-9dee-e4264ce5aedb.mp4",
+    "source_lang": "auto",
+    "target_lang": "es",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T20:35:04.771876",
+    "message": "Starting audio translation...",
+    "result": {
+      "download_url": "/api/download/audio/cbeb1a33-d5d4-427f-98ab-72ff5e61b30f",
+      "duration_match_percent": 58.63116007044829,
+      "speed_adjustment": 0.85
+    },
+    "completed_at": "2025-12-31T20:36:54.350139",
+    "output_path": "translated_20251231_233650.wav"
+  },
+  "438a039b-aa6b-44f6-9008-b2785304206a": {
+    "id": "438a039b-aa6b-44f6-9008-b2785304206a",
+    "type": "audio",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_e1b6ed6b-4a29-48bc-be43-32ab6a5e611b.mp3",
+    "source_lang": "auto",
+    "target_lang": "es",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T20:44:05.394787",
+    "message": "Starting audio translation...",
+    "result": {
+      "download_url": "/api/download/audio/438a039b-aa6b-44f6-9008-b2785304206a",
+      "duration_match_percent": 58.63116007044829,
+      "speed_adjustment": 0.85
+    },
+    "completed_at": "2025-12-31T20:45:56.916656",
+    "output_path": "translated_20251231_234552.wav"
+  },
+  "73118ea4-98fe-4cb9-abe6-ff248b16d1b6": {
+    "id": "73118ea4-98fe-4cb9-abe6-ff248b16d1b6",
+    "type": "audio",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_06e47880-453b-46dc-b80e-5c9addcfa307.mp4",
+    "source_lang": "auto",
+    "target_lang": "es",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T20:48:29.382212",
+    "message": "Starting audio translation...",
+    "result": {
+      "download_url": "/api/download/audio/73118ea4-98fe-4cb9-abe6-ff248b16d1b6",
+      "duration_match_percent": 58.63116007044829,
+      "speed_adjustment": 0.85
+    },
+    "completed_at": "2025-12-31T20:50:10.097863",
+    "output_path": "translated_20251231_235006.wav"
+  },
+  "73712011-6002-4b86-a78a-7d7130a63038": {
+    "id": "73712011-6002-4b86-a78a-7d7130a63038",
+    "type": "audio",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_08078306-a397-4ba7-ba0a-3a81b1fd92a4.mp3",
+    "source_lang": "auto",
+    "target_lang": "es",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T20:56:54.970237",
+    "message": "Starting audio translation...",
+    "result": {
+      "download_url": "/api/download/audio/73712011-6002-4b86-a78a-7d7130a63038",
+      "duration_match_percent": 58.63116007044829,
+      "speed_adjustment": 0.85
+    },
+    "completed_at": "2025-12-31T20:58:47.279205",
+    "output_path": "translated_20251231_235843.wav"
+  },
+  "efa095b9-8580-43d9-a8c2-106ee5ed8d47": {
+    "id": "efa095b9-8580-43d9-a8c2-106ee5ed8d47",
+    "type": "subtitles",
+    "status": "completed",
+    "progress": 100,
+    "file_path": "temp_1f6c87f5-869d-450c-927d-264bd8ccce3e.mp3",
+    "language": "en",
+    "format": "srt",
+    "user_id": "58563623-2901-4f12-a57c-54e1f8a8cbbb",
+    "user_email": "Jim.amuto@strathmore.edu",
+    "created_at": "2025-12-31T21:00:26.648925",
+    "result": {
+      "download_url": "/api/translate/download/subtitles/efa095b9-8580-43d9-a8c2-106ee5ed8d47",
+      "format": "srt",
+      "segment_count": 46,
+      "language": "en"
+    },
+    "completed_at": "2025-12-31T21:00:55.135033",
+    "output_path": "subtitles_efa095b9-8580-43d9-a8c2-106ee5ed8d47.srt"
   }
 }

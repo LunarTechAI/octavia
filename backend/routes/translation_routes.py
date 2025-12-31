@@ -33,7 +33,7 @@ except Exception as e:
 
 
 # Import shared dependencies
-from shared_dependencies import User, get_current_user, supabase
+from shared_dependencies import User, get_current_user, get_current_user_id, supabase
 import os
 
 router = APIRouter(prefix="/api/translate", tags=["translation"])
@@ -374,6 +374,8 @@ async def translate_audio(
             current_user.id
         )
 
+        save_translation_jobs()
+
         return {
             "success": True,
             "job_id": job_id,
@@ -599,10 +601,8 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
             pass  # Silent failure for refund
 
 @router.get("/jobs/{job_id}/status")
-async def get_job_status(job_id: str, current_user: User = Depends(get_current_user)):
+async def get_job_status(job_id: str, current_user_id: str = Depends(get_current_user_id)):
     """Get status of a translation job"""
-    DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
-    is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
     # Check both translation_jobs and jobs_db (from app.py)
     job = None
     job_source = None
@@ -659,14 +659,14 @@ async def get_job_status(job_id: str, current_user: User = Depends(get_current_u
         )
 
     # Check user ownership if user_id is stored
-    if job.get("user_id") and job.get("user_id") != current_user.id:
+    if job.get("user_id") and job.get("user_id") != current_user_id:
         raise HTTPException(
             status_code=403,
             detail={
                 "success": False,
                 "error": "Access denied - job belongs to different user",
                 "job_user_id": job.get("user_id"),
-                "current_user_id": current_user.id
+                "current_user_id": current_user_id
             }
         )
 
@@ -976,6 +976,8 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
             "output_path": result.output_path  # Use the actual output path from translator
         })
 
+        save_translation_jobs()
+
         # Cleanup temp file
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -991,6 +993,8 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
                 "output_path": None
             }
         })
+
+        save_translation_jobs()
 
         # Refund credits on failure
         try:
@@ -1341,15 +1345,30 @@ async def download_file(file_type: str, file_id: str, current_user: User = Depen
                         print(f"Found video file at: {filename}")
                         break
 
-            # 4. Search for any file containing file_id
+            # 4. Search for any file containing file_id with correct extension
             if not filename:
-                search_dirs = ["backend/backend/outputs", "backend/outputs", "outputs", "."]
+                search_dirs = [
+                    "backend/backend/outputs", 
+                    "backend/outputs", 
+                    "outputs", 
+                    ".",
+                    "outputs/subtitles",
+                    "backend/outputs/subtitles"
+                ]
+                
+                # Determine expected extension
+                expected_ext = ".mp4"
+                if file_type == "subtitles":
+                    expected_ext = ".srt"  # Default for subtitles
+                elif file_type == "audio":
+                    expected_ext = ".wav"
+                
                 for dir_path in search_dirs:
                     if os.path.exists(dir_path):
                         for file in os.listdir(dir_path):
-                            if file_id in file and file.endswith('.mp4'):
+                            if file_id in file and file.endswith(expected_ext):
                                 filename = os.path.join(dir_path, file)
-                                print(f"Found matching file: {filename}")
+                                print(f"Found matching {file_type} file: {filename}")
                                 break
                         if filename:
                             break
@@ -1383,24 +1402,33 @@ async def download_file(file_type: str, file_id: str, current_user: User = Depen
             if not os.path.exists(filename):
                 # Try to find any file with this file_id
                 import glob
-                video_files = glob.glob(f"*{file_id}*.mp4")
-                if video_files:
-                    filename = video_files[0]
-                    print(f"Found alternative video file: {filename}")
+                expected_ext = ".srt" if file_type == "subtitles" else ".wav" if file_type == "audio" else ".mp4"
+                
+                files = glob.glob(f"*{file_id}*{expected_ext}")
+                if files:
+                    filename = files[0]
+                    print(f"Found alternative {file_type} file: {filename}")
                 else:
-                    # Try to find in outputs directory
-                    outputs_dir = "outputs"
-                    if os.path.exists(outputs_dir):
-                        output_files = glob.glob(f"{outputs_dir}/*{file_id}*.mp4")
-                        if output_files:
-                            filename = output_files[0]
-                            print(f"Found video file in outputs directory: {filename}")
-                        else:
-                            print(f"No video files found for file_id {file_id}")
-                            raise HTTPException(status_code=404, detail="File not found")
-                    else:
-                        print(f"No video files found for file_id {file_id}")
-                        raise HTTPException(status_code=404, detail="File not found")
+                    # Try to find in outputs directory and subdirectories
+                    search_patterns = [
+                        f"outputs/*{file_id}*{expected_ext}",
+                        f"outputs/{file_type}/*{file_id}*{expected_ext}",
+                        f"backend/outputs/*{file_id}*{expected_ext}",
+                        f"backend/outputs/{file_type}/*{file_id}*{expected_ext}"
+                    ]
+                    
+                    found = False
+                    for pattern in search_patterns:
+                        matches = glob.glob(pattern)
+                        if matches:
+                            filename = matches[0]
+                            print(f"Found {file_type} file by pattern {pattern}: {filename}")
+                            found = True
+                            break
+                    
+                    if not found:
+                        print(f"No {file_type} files found for file_id {file_id}")
+                        raise HTTPException(status_code=404, detail=f"{file_type.capitalize()} file not found")
 
         # Verify file is actually a video file
         if filename and os.path.exists(filename):

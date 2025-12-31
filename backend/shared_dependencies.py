@@ -111,6 +111,26 @@ def verify_token(token: str):
     except JWTError:
         return None
 
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
+    """Get current user ID from JWT token without database lookup"""
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+
+    return user_id
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     """Get current user from JWT token"""
     token = credentials.credentials

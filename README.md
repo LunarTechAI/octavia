@@ -334,6 +334,126 @@ export NEXT_PUBLIC_API_URL=http://localhost:8000
 5. **Cloud Scaling**: Distributed processing for long videos
 6. **Original Audio Preservation**: Backend changes to retain original audio tracks
 
+## 🔴 Persistent Issues (Mentor Review)
+
+### Critical Issues Requiring Attention
+
+#### 1. **Progress Bar During Translation** 🔴
+- **Status**: Persistently refusing to get fixed
+- **Impact**: High - affects user experience during translation
+- **Description**: The progress bar does not accurately reflect translation progress in real-time
+- **Affected Features**: Video translation, audio translation
+- **Developer Notes**: 
+  - Frontend polling mechanism works correctly
+  - Backend progress updates are being sent
+  - Issue appears to be in the progress calculation logic or state management
+  - Requires deep dive into the job status update flow
+
+#### 2. **Subtitle Generation Download Feature** 🟡
+- **Status**: Works but download feature needs fixing
+- **Impact**: Medium - subtitle generation completes successfully
+- **Description**: Subtitle generation works correctly, but the download endpoint has issues
+- **Affected Features**: Subtitle generation
+- **Developer Notes**:
+  - Generation process completes successfully
+  - Files are created and stored correctly
+  - Download endpoint routing or file path resolution needs investigation
+  - May be related to job persistence in `subtitle_jobs` dictionary
+
+#### 3. **Subtitle Translation Performance** 🟡
+- **Status**: Works but slower than expected
+- **Impact**: Medium - functional but not optimal
+- **Description**: Subtitle translation takes longer than anticipated
+- **Affected Features**: Subtitle translation
+- **Developer Notes**:
+  - Helsinki NLP model loading time may be the bottleneck
+  - Consider model caching or pre-loading
+  - Investigate async processing optimization
+  - Add performance profiling to identify exact bottleneck
+
+#### 4. **Developer Logging System** 🟡
+- **Status**: Needs enhancement
+- **Impact**: Low - affects debugging efficiency
+- **Description**: Current logging system needs more detailed output for debugging
+- **Recommendations**:
+  - Add structured logging with log levels (DEBUG, INFO, WARNING, ERROR)
+  - Implement request tracing with correlation IDs
+  - Add performance metrics logging
+  - Create separate log files for different modules
+  - Implement log rotation to prevent disk space issues
+
+#### 5. **Job History Limitations** 🟠
+- **Status**: Partially implemented
+- **Impact**: Medium - affects user experience and data persistence
+- **Description**: Job history system has several limitations
+- **Specific Issues**:
+  - **Translation Jobs**: Works but lacks detailed metadata
+    - Missing: file size, processing time, quality metrics
+    - Missing: error details and retry information
+  - **Subtitle Jobs**: Not implemented yet
+    - No history tracking for subtitle generation
+    - No history tracking for subtitle translation
+  - **Credits History**: Not implemented yet
+    - No transaction log for credit usage
+    - No refund tracking
+- **Developer Notes**:
+  - Consider implementing a unified job history table in Supabase
+  - Add job metadata schema with all relevant fields
+  - Implement pagination for large job lists
+  - Add filtering and search capabilities
+
+#### 6. **Audio Translation Quality Assurance** 🟠
+- **Status**: Works but needs QA improvements
+- **Impact**: Medium - affects output quality
+- **Description**: Audio translation completes successfully but quality assurance is lacking
+- **Specific Issues**:
+  - No automated quality checks on generated audio
+  - No validation of audio duration matching
+  - No SNR (Signal-to-Noise Ratio) verification
+  - No lip-sync accuracy validation
+- **Developer Notes**:
+  - Implement automated quality checks:
+    - Audio duration validation (should match source ±100ms)
+    - SNR threshold validation (\u003e20dB recommended)
+    - Silence detection and removal
+    - Peak normalization verification
+  - Add quality metrics to job results
+  - Consider implementing a quality score system
+
+#### 7. **Subtitle-to-Audio Feature** 🟡
+- **Status**: Works but not as intended
+- **Impact**: Medium - functional but needs refinement
+- **Description**: Subtitle-to-audio conversion works but has quality and timing issues
+- **Specific Issues**:
+  - Timing synchronization could be more accurate
+  - Audio quality varies depending on TTS engine
+  - No voice selection options for users
+  - No prosody or emotion control
+- **Developer Notes**:
+  - Currently uses gTTS as primary, Edge-TTS as fallback
+  - Consider adding voice selection UI
+  - Implement better timing synchronization algorithm
+  - Add audio post-processing for consistent quality
+
+### In-Memory Job Storage Limitation 🔴
+- **Critical Issue**: All job data (`jobs_db`, `subtitle_jobs`, `translation_jobs`) is stored in-memory
+- **Impact**: Jobs are lost on server restart
+- **Recommendation**: Migrate to persistent storage (Supabase or PostgreSQL)
+- **Workaround**: `translation_jobs` has JSON file backup, but not real-time
+
+### Testing Recommendations
+1. Add integration tests for all job types
+2. Implement end-to-end tests for complete workflows
+3. Add performance benchmarks for each feature
+4. Create automated quality validation tests
+5. Implement stress testing for concurrent jobs
+
+### Priority Order for Fixes
+1. 🔴 **High Priority**: Progress bar, in-memory job storage
+2. 🟠 **Medium Priority**: Job history implementation, audio QA
+3. 🟡 **Low Priority**: Subtitle download, performance optimization, logging enhancements
+
+
 ## 📈 Recent Updates & Changelog
 
 ### Version 1.1.0 - Advanced Video Player Features

@@ -121,7 +121,7 @@ if import_errors:
 
 # Import shared dependencies
 from shared_dependencies import (
-    supabase, User, get_current_user, verify_password, get_password_hash,
+    supabase, User, get_current_user, get_current_user_id, verify_password, get_password_hash,
     create_access_token, verify_token, password_manager, ACCESS_TOKEN_EXPIRE_MINUTES,
     JWT_SECRET, ALGORITHM
 )
@@ -2159,12 +2159,24 @@ async def download_audio(
     """Download translated audio file"""
     logger.info(f"Audio download request for job {job_id}")
     
-    # Check if job exists in jobs_db
-    if job_id not in jobs_db:
-        logger.error(f"Job {job_id} not found in jobs_db")
-        raise HTTPException(404, "Job not found")
+    # Check in translation_jobs first (from translation_routes)
+    import sys
+    translation_jobs = None
+    for module_name, module in sys.modules.items():
+        if 'translation_routes' in module_name and hasattr(module, 'translation_jobs'):
+            translation_jobs = module.translation_jobs
+            break
     
-    job = jobs_db[job_id]
+    job = None
+    if translation_jobs and job_id in translation_jobs:
+        job = translation_jobs[job_id]
+        logger.info(f"Found audio job {job_id} in translation_jobs")
+    elif job_id in jobs_db:
+        job = jobs_db[job_id]
+        logger.info(f"Found audio job {job_id} in jobs_db")
+    else:
+        logger.error(f"Job {job_id} not found in translation_jobs or jobs_db")
+        raise HTTPException(404, "Job not found")
     logger.info(f"Job status: {job.get('status')}, user_id: {job.get('user_id')}, current_user: {current_user.id}")
     
     if job["user_id"] != current_user.id:
@@ -2229,6 +2241,30 @@ async def download_generic(job_id: str, current_user: User = Depends(get_current
     """Generic download endpoint that tries to find any file for this job"""
     logger.info(f"Generic download request for job {job_id}")
     
+    # Check in subtitle_jobs first (subtitle-to-audio)
+    if job_id in subtitle_jobs:
+        logger.info(f"Found job {job_id} in subtitle_jobs, routing to subtitle-audio download")
+        return await _download_subtitle_audio_helper(job_id, current_user)
+    
+    # Check in translation_jobs (audio/video translation from translation_routes)
+    import sys
+    translation_jobs = None
+    for module_name, module in sys.modules.items():
+        if 'translation_routes' in module_name and hasattr(module, 'translation_jobs'):
+            translation_jobs = module.translation_jobs
+            break
+    
+    if translation_jobs and job_id in translation_jobs:
+        job = translation_jobs[job_id]
+        job_type = job.get("type", "unknown")
+        logger.info(f"Found job {job_id} in translation_jobs with type {job_type}")
+        
+        # Route to appropriate download handler based on job type
+        if job_type == "audio":
+            return await download_audio(job_id, current_user)
+        elif job_type == "video":
+            return await download_video(job_id, current_user)
+    
     # Check in jobs_db (video or audio translation)
     if job_id in jobs_db:
         job = jobs_db[job_id]
@@ -2239,6 +2275,10 @@ async def download_generic(job_id: str, current_user: User = Depends(get_current
             return await download_audio(job_id, current_user)
         else:
             return await download_video(job_id, current_user)
+    
+    # Job not found in any dictionary
+    logger.error(f"Job {job_id} not found in subtitle_jobs, translation_jobs, or jobs_db")
+    raise HTTPException(404, "Job not found")
 
 
 
@@ -2748,15 +2788,17 @@ async def review_subtitles(
         subtitle_content = ""
     return {
         "success": True,
-        "job_id": job_id,
-        "status": job.get("status"),
-        "format": format,
-        "language": job.get("language"),
-        "segment_count": job.get("segment_count", 0),
-        "content": subtitle_content,
-        "download_url": job.get("download_url"),
-        "created_at": job.get("created_at"),
-        "completed_at": job.get("completed_at")
+        "data": {
+            "job_id": job_id,
+            "status": job.get("status"),
+            "format": format,
+            "language": job.get("language"),
+            "segment_count": job.get("segment_count", 0),
+            "content": subtitle_content,
+            "download_url": job.get("download_url"),
+            "created_at": job.get("created_at"),
+            "completed_at": job.get("completed_at")
+        }
     }
 
 
@@ -2908,18 +2950,18 @@ async def generate_audio_from_subtitles(subtitle_content: str, language: str, vo
                         # Try TTS methods (will run in thread pool to avoid blocking)
                         loop = asyncio.get_event_loop()
                         try:
-                            # Try Edge TTS first
+                            # Try gTTS first (more reliable)
                             success, _ = await loop.run_in_executor(
                                 None,
-                                partial(translator._edge_tts_synthesis, text, [], temp_output_path)
+                                partial(translator._fallback_gtts_synthesis, text, [], temp_output_path)
                             )
 
                             if not success or not os.path.exists(temp_output_path):
-                                logger.debug(f"Edge TTS failed for subtitle {i+1}, trying gTTS")
-                                # Fallback to gTTS
+                                logger.debug(f"gTTS failed for subtitle {i+1}, trying Edge TTS")
+                                # Fallback to Edge TTS
                                 success, _ = await loop.run_in_executor(
                                     None,
-                                    partial(translator._fallback_gtts_synthesis, text, [], temp_output_path)
+                                    partial(translator._edge_tts_synthesis, text, [], temp_output_path)
                                 )
 
                             if not success or not os.path.exists(temp_output_path):
@@ -2980,7 +3022,7 @@ async def generate_audio_from_subtitles(subtitle_content: str, language: str, vo
             return audio_segments
 
         # Run parallel audio generation
-        audio_segments = asyncio.run(generate_audio_parallel())
+        audio_segments = await generate_audio_parallel()
         
         # Combine all audio segments
         if not audio_segments:
@@ -2996,17 +3038,21 @@ async def generate_audio_from_subtitles(subtitle_content: str, language: str, vo
         for start_ms, segment in audio_segments:
             combined = combined.overlay(segment, position=int(start_ms))
         
+        # Ensure outputs directory exists
+        os.makedirs("outputs", exist_ok=True)
+        
         # Export to requested format
         output_filename = f"subtitle_audio_{uuid.uuid4()}.{output_format}"
+        output_path = os.path.join("outputs", output_filename)
         
         if output_format == "mp3":
-            combined.export(output_filename, format="mp3", bitrate="192k")
+            combined.export(output_path, format="mp3", bitrate="192k")
         elif output_format == "wav":
-            combined.export(output_filename, format="wav")
+            combined.export(output_path, format="wav")
         else:
-            combined.export(output_filename, format="mp3", bitrate="192k")
+            combined.export(output_path, format="mp3", bitrate="192k")
         
-        logger.info(f"✅ Successfully generated audio file: {output_filename} ({len(subtitles)} segments)")
+        logger.info(f"[SUCCESS] Successfully generated audio file: {output_path} ({len(subtitles)} segments)")
         return output_filename, len(subtitles)
         
     except Exception as e:
@@ -3327,15 +3373,15 @@ async def process_subtitle_to_audio_job(
 @app.get("/api/generate/subtitle-audio/status/{job_id}")
 async def get_subtitle_audio_status(
     job_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user_id: str = Depends(get_current_user_id)
 ):
     """Get status of a subtitle-to-audio job"""
     if job_id not in subtitle_jobs:
         raise HTTPException(404, "Job not found")
     
     job = subtitle_jobs[job_id]
-    
-    if job["user_id"] != current_user.id:
+
+    if job["user_id"] != current_user_id:
         raise HTTPException(403, "Access denied")
     
     status = job.get("status", "pending")
@@ -3443,27 +3489,48 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
 # Download subtitle audio file
 async def _download_subtitle_audio_helper(job_id, current_user):
     """Download generated subtitle audio file"""
-    logger.info(f"Downloading subtitle audio for job_id={job_id}")
+    logger.info(f"[DOWNLOAD] Starting download for job_id={job_id}")
+    logger.info(f"[DOWNLOAD] Current user ID: {current_user.id}")
+    logger.info(f"[DOWNLOAD] Total jobs in subtitle_jobs: {len(subtitle_jobs)}")
+    logger.info(f"[DOWNLOAD] Job IDs in subtitle_jobs: {list(subtitle_jobs.keys())}")
 
     if job_id not in subtitle_jobs:
+        logger.error(f"[DOWNLOAD] Job {job_id} not found in subtitle_jobs dictionary")
         raise HTTPException(404, "Job not found")
 
     job = subtitle_jobs[job_id]
+    logger.info(f"[DOWNLOAD] Job found: {job}")
 
     if job["user_id"] != current_user.id:
+        logger.error(f"[DOWNLOAD] Access denied: job user_id={job['user_id']}, current user={current_user.id}")
         raise HTTPException(403, "Access denied")
 
     if job["status"] != "completed":
+        logger.error(f"[DOWNLOAD] Job not completed yet, status: {job['status']}")
         raise HTTPException(400, "Job not completed yet")
 
     audio_filename = job.get("filename")
+    logger.info(f"[DOWNLOAD] Audio filename from job: {audio_filename}")
+    
     if not audio_filename:
+        logger.error(f"[DOWNLOAD] No filename in job data")
         raise HTTPException(404, "Audio file not found")
 
     audio_path = os.path.join("outputs", audio_filename)
+    logger.info(f"[DOWNLOAD] Constructed audio path: {audio_path}")
+    logger.info(f"[DOWNLOAD] File exists check: {os.path.exists(audio_path)}")
 
     if not os.path.exists(audio_path):
+        logger.error(f"[DOWNLOAD] Audio file not found on disk: {audio_path}")
+        # List files in outputs directory for debugging
+        try:
+            outputs_files = os.listdir("outputs")
+            logger.error(f"[DOWNLOAD] Files in outputs directory: {outputs_files}")
+        except Exception as e:
+            logger.error(f"[DOWNLOAD] Could not list outputs directory: {e}")
         raise HTTPException(404, "Audio file not found on disk")
+
+    logger.info(f"[DOWNLOAD] File found, preparing to send: {audio_path}")
 
     # Stream the file back to client
     def iterfile():
@@ -3791,3 +3858,4 @@ if __name__ == "__main__":
         port=8000,
         reload=False
     )
+

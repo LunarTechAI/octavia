@@ -772,6 +772,23 @@ class ApiService {
     }, true);  // Authentication required
   }
 
+  // Translate audio file
+  async translateAudio(params: {
+    file: File;
+    sourceLanguage: string;
+    targetLanguage: string;
+  }): Promise<ApiResponse<{ job_id: string }>> {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    formData.append('source_lang', params.sourceLanguage);
+    formData.append('target_lang', params.targetLanguage);
+
+    return this.request<{ job_id: string }>(`/api/translate/audio`, {
+      method: 'POST',
+      body: formData,
+    }, true);
+  }
+
   // Get subtitle job status (uses generic job status endpoint)
   async getSubtitleJobStatus(jobId: string): Promise<ApiResponse<{
     job_id: string;
@@ -784,6 +801,31 @@ class ApiService {
     error?: string;
   }>> {
     return this.getJobStatus(jobId);
+  }
+
+  // Get subtitle data for review
+  async getSubtitleReviewData(jobId: string): Promise<ApiResponse<SubtitleReviewData>> {
+    return this.request<SubtitleReviewData>(`/api/translate/subtitles/review/${jobId}`, {
+      method: 'GET',
+    }, true);
+  }
+
+  // Download subtitle file
+  async downloadSubtitleFile(jobId: string): Promise<Blob> {
+    const token = this.getToken();
+    const url = `${API_BASE_URL}/api/translate/download/subtitles/${jobId}`;
+
+    const response = await fetch(url, {
+      headers: token ? {
+        'Authorization': `Bearer ${token}`
+      } : {},
+    });
+
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    }
+
+    return await response.blob();
   }
 
   // --- POLLING HELPERS ---

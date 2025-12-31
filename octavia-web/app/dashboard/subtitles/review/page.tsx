@@ -20,7 +20,7 @@ export default function SubtitleReviewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const jobId = searchParams.get("jobId") || localStorage.getItem("current_subtitle_job");
-  
+
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,16 +36,16 @@ export default function SubtitleReviewPage() {
   const parseSRTTimeToSeconds = (timeStr: string): number => {
     const normalized = timeStr.replace(',', '.');
     const parts = normalized.split(':');
-    
+
     if (parts.length === 3) {
       const [hours, minutes, seconds] = parts.map(part => {
         const [whole, decimal] = part.split('.');
         return parseFloat(whole) + (decimal ? parseFloat(`0.${decimal}`) : 0);
       });
-      
+
       return hours * 3600 + minutes * 60 + seconds;
     }
-    
+
     return 0;
   };
 
@@ -55,7 +55,7 @@ export default function SubtitleReviewPage() {
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     const millis = Math.floor((seconds - Math.floor(seconds)) * 1000);
-    
+
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${millis.toString().padStart(3, '0')}`;
   };
 
@@ -64,7 +64,7 @@ export default function SubtitleReviewPage() {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    
+
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
@@ -75,16 +75,16 @@ export default function SubtitleReviewPage() {
   const parseSRTContent = (srtContent: string): any[] => {
     const segments: any[] = [];
     const lines = srtContent.split('\n');
-    
+
     let currentSegment: any = null;
     let textLines: string[] = [];
-    
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
-      
+
       // Skip empty lines at the start of a segment
       if (!line && !currentSegment) continue;
-      
+
       // If we hit an empty line and have a segment, finalize it
       if (!line && currentSegment) {
         if (textLines.length > 0) {
@@ -95,7 +95,7 @@ export default function SubtitleReviewPage() {
         textLines = [];
         continue;
       }
-      
+
       // Check if line is a segment number
       if (/^\d+$/.test(line) && !currentSegment) {
         currentSegment = { id: parseInt(line), start: 0, end: 0, text: '' };
@@ -116,7 +116,7 @@ export default function SubtitleReviewPage() {
       currentSegment.text = textLines.join(' ');
       segments.push(currentSegment);
     }
-    
+
     return segments;
   };
 
@@ -130,19 +130,21 @@ export default function SubtitleReviewPage() {
       try {
         // Use the API utility instead of direct fetch
         const response = await api.getSubtitleReviewData(jobId);
-        
+
         if (response.success) {
+          const reviewData = response.data || (response as any);
+
           // Check if we have content (SRT string) or segments (already parsed)
           let segments: any[] = [];
-          
-          if (response.content) {
+
+          if (reviewData.content) {
             // Parse the SRT content
-            segments = parseSRTContent(response.content);
-          } else if (response.segments) {
+            segments = parseSRTContent(reviewData.content);
+          } else if (reviewData.segments) {
             // Use already parsed segments
-            segments = response.segments;
+            segments = reviewData.segments;
           }
-          
+
           if (segments.length > 0) {
             // Convert to display format
             const formattedSubtitles = segments.map((segment, index) => ({
@@ -152,14 +154,14 @@ export default function SubtitleReviewPage() {
               text: segment.text,
               timestamp: `${formatSecondsToSRT(segment.start)} → ${formatSecondsToSRT(segment.end)}`
             }));
-            
+
             setSubtitles(formattedSubtitles);
             setJobInfo({
               totalLines: formattedSubtitles.length,
               duration: formatSecondsToDisplay(Math.max(...formattedSubtitles.map(s => s.end))),
-              language: response.language || "English",
-              format: response.format?.toUpperCase() || "SRT",
-              download_url: response.download_url || ""
+              language: reviewData.language || "English",
+              format: reviewData.format?.toUpperCase() || "SRT",
+              download_url: reviewData.download_url || ""
             });
           } else {
             // Fallback to demo data
@@ -188,7 +190,7 @@ export default function SubtitleReviewPage() {
       { id: 4, start: 18, end: 23, text: "You can edit any subtitle by clicking on it.", timestamp: "00:00:18,000 → 00:00:23,000" },
       { id: 5, start: 24, end: 30, text: "When you're satisfied, download the final file.", timestamp: "00:00:24,000 → 00:00:30,000" },
     ];
-    
+
     setSubtitles(demoSubtitles);
     setJobInfo({
       totalLines: demoSubtitles.length,
@@ -200,7 +202,7 @@ export default function SubtitleReviewPage() {
   };
 
   const handleEdit = (id: number) => {
-    setSubtitles(subtitles.map(sub => 
+    setSubtitles(subtitles.map(sub =>
       sub.id === id ? { ...sub, isEditing: true, editedText: sub.text } : sub
     ));
   };
@@ -210,10 +212,10 @@ export default function SubtitleReviewPage() {
     if (!subtitle || !subtitle.editedText) return;
 
     setSaving(true);
-    
+
     // Simulate API call
     setTimeout(() => {
-      setSubtitles(subtitles.map(sub => 
+      setSubtitles(subtitles.map(sub =>
         sub.id === id ? { ...sub, text: subtitle.editedText!, isEditing: false } : sub
       ));
       setSaving(false);
@@ -221,40 +223,25 @@ export default function SubtitleReviewPage() {
   };
 
   const handleCancel = (id: number) => {
-    setSubtitles(subtitles.map(sub => 
+    setSubtitles(subtitles.map(sub =>
       sub.id === id ? { ...sub, isEditing: false } : sub
     ));
   };
 
   const handleTextChange = (id: number, text: string) => {
-    setSubtitles(subtitles.map(sub => 
+    setSubtitles(subtitles.map(sub =>
       sub.id === id ? { ...sub, editedText: text } : sub
     ));
   };
 
- const handleDownload = async (format: string) => {
-  try {
-    // Try to download using the API function first
-    const blob = await api.downloadSubtitleFile(jobId);
-    
-    // Create download link
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `subtitles_${jobId}.${format.toLowerCase()}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    
-    alert(`Subtitles downloaded in ${format} format!`);
-  } catch (error) {
-    console.error("Download failed:", error);
-    
-    // Fallback: generate and download locally
+  const handleDownload = async (format: string) => {
+    if (!jobId) return;
+
     try {
-      const content = generateSubtitleContent(format);
-      const blob = new Blob([content], { type: 'text/plain' });
+      // Try to download using the API function first
+      const blob = await api.downloadSubtitleFile(jobId);
+
+      // Create download link
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -263,26 +250,43 @@ export default function SubtitleReviewPage() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
-      alert(`Subtitles downloaded in ${format} format! (Local fallback)`);
-    } catch (fallbackError) {
-      console.error("Fallback download also failed:", fallbackError);
-      alert("Failed to download subtitles. Please try again.");
+
+      alert(`Subtitles downloaded in ${format} format!`);
+    } catch (error) {
+      console.error("Download failed:", error);
+
+      // Fallback: generate and download locally
+      try {
+        const content = generateSubtitleContent(format);
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `subtitles_${jobId}.${format.toLowerCase()}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        alert(`Subtitles downloaded in ${format} format! (Local fallback)`);
+      } catch (fallbackError) {
+        console.error("Fallback download also failed:", fallbackError);
+        alert("Failed to download subtitles. Please try again.");
+      }
     }
-  }
-};
+  };
 
   const generateSubtitleContent = (format: string): string => {
     switch (format.toUpperCase()) {
       case "SRT":
-        return subtitles.map(sub => 
+        return subtitles.map(sub =>
           `${sub.id}\n${sub.timestamp.split(" → ").join(" --> ")}\n${sub.text}\n`
         ).join("\n");
-      
+
       case "VTT":
-        return `WEBVTT\n\n${subtitles.map(sub => 
+        return `WEBVTT\n\n${subtitles.map(sub =>
           `${sub.timestamp.split(" → ").join(" --> ").replace(/,/g, ".")}\n${sub.text}\n`
         ).join("\n")}`;
-      
+
       case "ASS":
         return `[Script Info]
 Title: Octavia Generated Subtitles
@@ -296,10 +300,10 @@ Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-${subtitles.map(sub => 
-  `Dialogue: 0,${sub.timestamp.split(" → ").map(t => t.replace(/:/g, ".").replace(",", ".")).join(",")},Default,,0,0,0,,${sub.text}`
-).join("\n")}`;
-      
+${subtitles.map(sub =>
+          `Dialogue: 0,${sub.timestamp.split(" → ").map(t => t.replace(/:/g, ".").replace(",", ".")).join(",")},Default,,0,0,0,,${sub.text}`
+        ).join("\n")}`;
+
       default:
         return subtitles.map(sub => sub.text).join("\n");
     }
@@ -312,7 +316,7 @@ ${subtitles.map(sub =>
           <h1 className="font-display text-3xl font-black text-white text-glow-purple mb-2">Loading Subtitles</h1>
           <p className="text-slate-400 text-sm">Fetching your generated subtitles...</p>
         </div>
-        
+
         <div className="glass-panel p-8 flex items-center justify-center">
           <Loader2 className="w-12 h-12 text-primary-purple-bright animate-spin" />
         </div>
@@ -357,7 +361,7 @@ ${subtitles.map(sub =>
                     <div className="flex gap-1">
                       {sub.isEditing ? (
                         <>
-                          <button 
+                          <button
                             onClick={() => handleSave(sub.id)}
                             disabled={saving}
                             className="p-1 rounded hover:bg-green-500/10 text-green-400 hover:text-green-300 transition-colors disabled:opacity-50"
@@ -369,7 +373,7 @@ ${subtitles.map(sub =>
                               <Save className="w-3.5 h-3.5" />
                             )}
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleCancel(sub.id)}
                             className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors"
                             title="Cancel"
@@ -378,7 +382,7 @@ ${subtitles.map(sub =>
                           </button>
                         </>
                       ) : (
-                        <button 
+                        <button
                           onClick={() => handleEdit(sub.id)}
                           className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-white/10"
                           title="Edit"
@@ -388,7 +392,7 @@ ${subtitles.map(sub =>
                       )}
                     </div>
                   </div>
-                  
+
                   {sub.isEditing ? (
                     <textarea
                       value={sub.editedText || sub.text}
@@ -452,7 +456,7 @@ ${subtitles.map(sub =>
 
           {/* Actions */}
           <div className="flex flex-col gap-4">
-            <button 
+            <button
               onClick={() => handleDownload("SRT")}
               className="btn-border-beam w-full group"
             >
@@ -463,28 +467,28 @@ ${subtitles.map(sub =>
             </button>
 
             <div className="grid grid-cols-2 gap-3">
-              <button 
+              <button
                 onClick={() => handleDownload("VTT")}
                 className="flex items-center justify-center gap-2 py-2.5 rounded-lg border border-white/10 bg-white/5 text-white font-medium hover:bg-white/10 transition-all text-sm"
               >
                 Download VTT
               </button>
-              <button 
+              <button
                 onClick={() => handleDownload("ASS")}
                 className="flex items-center justify-center gap-2 py-2.5 rounded-lg border border-white/10 bg-white/5 text-white font-medium hover:bg-white/10 transition-all text-sm"
               >
                 Download ASS
               </button>
             </div>
-            
-            <button 
+
+            <button
               onClick={() => router.push("/dashboard/subtitles")}
               className="w-full py-2.5 rounded-lg border border-white/10 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors"
             >
               Generate New Subtitles
             </button>
-            
-            <button 
+
+            <button
               onClick={() => router.push("/dashboard/history")}
               className="w-full py-2.5 rounded-lg border border-white/10 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors"
             >

@@ -219,13 +219,14 @@ export default function AudioTranslationPage() {
 
         if (response.success) {
           // The job data is directly in the response, not in response.data
+          const jobData = response.data || response; // Fallback to response if data is not present
           const job = {
-            job_id: response.job_id,
-            status: response.status,
-            progress: response.progress || 0,
-            download_url: response.download_url,
-            error: response.error,
-            message: response.message
+            job_id: jobData.job_id,
+            status: jobData.status,
+            progress: jobData.progress || 0,
+            download_url: jobData.download_url,
+            error: jobData.error,
+            message: jobData.message
           };
 
           console.log(`Job ${jobId} status: ${job.status}, progress: ${job.progress}`);
@@ -1146,3 +1147,5 @@ export default function AudioTranslationPage() {
     </div>
   );
 }
+
+
