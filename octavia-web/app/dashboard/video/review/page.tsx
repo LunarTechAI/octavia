@@ -5,6 +5,7 @@ import { RefreshCw, Download, AlertCircle, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
+import SideBySideVideoPlayer from "@/components/dashboard/SideBySideVideoPlayer";
 
 export default function VideoReviewPage() {
     const searchParams = useSearchParams();
@@ -14,8 +15,10 @@ export default function VideoReviewPage() {
     const [jobStatus, setJobStatus] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [originalVideoUrl, setOriginalVideoUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isDownloading, setIsDownloading] = useState(false);
+    const [viewMode, setViewMode] = useState<'single' | 'side-by-side'>('side-by-side');
 
     const getToken = (): string | null => {
         if (typeof window === 'undefined') return null;
@@ -81,11 +84,13 @@ export default function VideoReviewPage() {
             console.log('Job status:', data);
             setJobStatus(data.data || data);
 
-            // If job is completed, try to download video (only once)
-            if ((data.data?.status === 'completed' || data.status === 'completed') && !videoUrl && !isDownloading) {
-                setIsDownloading(true);
-                await downloadVideo(jobId, token);
-            }
+                // If job is completed, try to download video (only once)
+                if ((data.data?.status === 'completed' || data.status === 'completed') && !videoUrl && !isDownloading) {
+                    setIsDownloading(true);
+                    await downloadVideo(jobId, token);
+                    // Also try to get original video
+                    await downloadOriginalVideo(jobId, token);
+                }
 
         } catch (err: any) {
             console.error('Error:', err);
@@ -97,7 +102,7 @@ export default function VideoReviewPage() {
 
     const downloadVideo = async (jobId: string, token: string) => {
         console.log('Trying to download video for job:', jobId);
-        
+
         // Try multiple endpoints
         const endpoints = [
             `/api/download/video/${jobId}`,
@@ -108,7 +113,7 @@ export default function VideoReviewPage() {
             try {
                 const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${endpoint}`;
                 console.log('Trying:', url);
-                
+
                 const response = await fetch(url, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
@@ -116,7 +121,7 @@ export default function VideoReviewPage() {
                 if (response.ok) {
                     const blob = await response.blob();
                     console.log('Success! Blob size:', blob.size);
-                    
+
                     if (blob.size > 0) {
                         const objectUrl = URL.createObjectURL(blob);
                         setVideoUrl(objectUrl);
@@ -128,19 +133,53 @@ export default function VideoReviewPage() {
                 console.log(`Endpoint ${endpoint} failed:`, err);
             }
         }
-        
+
         console.log('All download attempts failed');
         return false;
     };
 
-    // Cleanup video URL on unmount
+    const downloadOriginalVideo = async (jobId: string, token: string) => {
+        console.log('Trying to download original video for job:', jobId);
+
+        try {
+            const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/download/original/${jobId}`;
+            console.log('Trying original video:', url);
+
+            const response = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                console.log('Original video success! Blob size:', blob.size);
+
+                if (blob.size > 0) {
+                    const objectUrl = URL.createObjectURL(blob);
+                    setOriginalVideoUrl(objectUrl);
+                    console.log('Original video loaded successfully');
+                    return true;
+                }
+            } else {
+                console.log('Original video not available (expected after processing)');
+            }
+        } catch (err) {
+            console.log('Original video download failed (expected):', err);
+        }
+
+        return false;
+    };
+
+    // Cleanup video URLs on unmount
     useEffect(() => {
         return () => {
             if (videoUrl && videoUrl.startsWith('blob:')) {
                 URL.revokeObjectURL(videoUrl);
             }
+            if (originalVideoUrl && originalVideoUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(originalVideoUrl);
+            }
         };
-    }, [videoUrl]);
+    }, [videoUrl, originalVideoUrl]);
 
     // Poll for job status
     useEffect(() => {
@@ -241,17 +280,57 @@ export default function VideoReviewPage() {
             <div className="flex flex-col lg:flex-row gap-8">
                 {/* Video Player */}
                 <div className="flex-1 flex flex-col gap-4">
-                    <div className="glass-panel p-1">
-                        {videoUrl ? (
-                            <video
-                                controls
-                                autoPlay
-                                className="w-full aspect-video rounded-lg bg-black"
-                                src={videoUrl}
-                            >
-                                Your browser does not support the video tag.
-                            </video>
+                    {videoUrl && (
+                        <div className="flex p-1 bg-white/5 rounded-lg border border-white/10">
+                            <label className="flex-1 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="view-mode"
+                                    value="single"
+                                    className="peer sr-only"
+                                    checked={viewMode === 'single'}
+                                    onChange={() => setViewMode('single')}
+                                />
+                                <div className="flex items-center justify-center py-2 rounded-md text-sm font-medium text-slate-400 peer-checked:bg-primary/20 peer-checked:text-white peer-checked:shadow-sm transition-all">
+                                    Single Video
+                                </div>
+                            </label>
+                            <label className="flex-1 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="view-mode"
+                                    value="side-by-side"
+                                    className="peer sr-only"
+                                    checked={viewMode === 'side-by-side'}
+                                    onChange={() => setViewMode('side-by-side')}
+                                />
+                                <div className="flex items-center justify-center py-2 rounded-md text-sm font-medium text-slate-400 peer-checked:bg-primary/20 peer-checked:text-white peer-checked:shadow-sm transition-all">
+                                    Side-by-Side
+                                </div>
+                            </label>
+                        </div>
+                    )}
+
+                    {videoUrl ? (
+                        viewMode === 'side-by-side' ? (
+                            <SideBySideVideoPlayer
+                                originalVideoUrl={originalVideoUrl}
+                                translatedVideoUrl={videoUrl}
+                            />
                         ) : (
+                            <div className="glass-panel p-1">
+                                <video
+                                    controls
+                                    autoPlay
+                                    className="w-full aspect-video rounded-lg bg-black"
+                                    src={videoUrl}
+                                >
+                                    Your browser does not support the video tag.
+                                </video>
+                            </div>
+                        )
+                    ) : (
+                        <div className="glass-panel p-1">
                             <div className="relative flex items-center justify-center bg-black bg-cover bg-center aspect-video rounded-lg overflow-hidden group">
                                 <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 to-black" />
                                 <div className="relative z-10 text-center p-8">
@@ -261,8 +340,8 @@ export default function VideoReviewPage() {
                                     <p className="text-slate-500 text-sm">Use the download button to get your video.</p>
                                 </div>
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
 
                     {/* Job Info */}
                     {jobStatus && (

@@ -562,3 +562,37 @@
   border: 1px solid rgba(147, 51, 234, 0.3);
   box-shadow: 0 0 20px rgba(147, 51, 234, 0.2), inset 0 0 20px rgba(147, 51, 234, 0.1);
 }
+
+/* Custom Slider Styles */
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--primary-purple);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(147, 51, 234, 0.5);
+  transition: all 0.2s ease;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  background: var(--primary-purple-bright);
+  box-shadow: 0 0 15px rgba(147, 51, 234, 0.8);
+}
+
+.slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--primary-purple);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(147, 51, 234, 0.5);
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.slider::-moz-range-thumb:hover {
+  background: var(--primary-purple-bright);
+  box-shadow: 0 0 15px rgba(147, 51, 234, 0.8);
+}

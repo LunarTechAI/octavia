@@ -2069,51 +2069,62 @@ async def download_video(
             f"*{job_id}*.mp4",  # Any file containing job_id
             f"{outputs_dir}/*{job_id}*.mp4",  # In outputs directory
             f"{outputs_dir}/translated_video_{job_id}.mp4",  # Exact match
-            f"{outputs_dir}/translated_temp_*.mp4",  # Temp files (most recent)
-            f"{outputs_dir}/*.mp4"  # Any MP4 file as last resort
         ]
 
         for pattern in search_patterns:
-            files = glob.glob(pattern)
-            if files:
-                # Sort by modification time (newest first) and take the first one
-                files.sort(key=os.path.getmtime, reverse=True)
-                filename = files[0]
-                logger.info(f"Found video file with pattern '{pattern}': {filename}")
+            matches = glob.glob(pattern)
+            if matches:
+                filename = matches[0]
+                logger.info(f"Found video file via pattern {pattern}: {filename}")
                 break
         else:
-            # No file found with any pattern
-            logger.error(f"No video files found for job {job_id}")
-            # Debug: list all files in outputs directory
-            if os.path.exists(outputs_dir):
-                all_files = os.listdir(outputs_dir)
-                logger.info(f"All files in outputs directory: {all_files}")
-            raise HTTPException(404, f"Video file not found for job {job_id}")
+            logger.error(f"Video file not found after searching patterns")
+            raise HTTPException(404, "Video file not found")
 
-    # Verify file is actually a video file
-    file_size = os.path.getsize(filename)
-    logger.info(f"Video file size: {file_size} bytes")
-
-    if file_size < 10000:  # Suspiciously small for a video
-        logger.warning(f"Video file suspiciously small: {file_size} bytes")
-        # Check if it's an error message
-        with open(filename, 'rb') as f:
-            content = f.read(500)
-            if b'error' in content.lower() or b'failed' in content.lower() or b'<!doctype' in content.lower():
-                logger.error("Video file contains error message instead of video")
-                raise HTTPException(500, "Video generation failed. Please try again.")
-
-    # Generate download filename
-    original_name = job.get("original_filename", f"video_{job_id}")
-    base_name = os.path.splitext(original_name)[0]
-    target_lang = job.get('target_language', 'es')
-    download_filename = f"{base_name}_translated_{target_lang}.mp4"
-    logger.info(f"Serving video file: {filename} as {download_filename}")
-
+    # Return the file
+    logger.info(f"Serving video file: {filename}")
     return FileResponse(
         filename,
-        media_type="video/mp4",
-        filename=download_filename
+        media_type='video/mp4',
+        filename=f"translated_video_{job_id}.mp4"
+    )
+
+@app.get("/api/download/original/{job_id}")
+async def download_original_video(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Download original video file (if still available)"""
+    logger.info(f"Original video download request for job {job_id}")
+
+    # Check if job exists in jobs_db
+    if job_id not in jobs_db:
+        logger.error(f"Job {job_id} not found in jobs_db")
+        raise HTTPException(404, "Job not found")
+
+    job = jobs_db[job_id]
+    logger.info(f"Job status: {job.get('status')}, user_id: {job.get('user_id')}, current_user: {current_user.id}")
+
+    if job["user_id"] != current_user.id:
+        logger.error(f"Access denied: job user {job['user_id']} != current user {current_user.id}")
+        raise HTTPException(403, "Access denied")
+
+    # Get the original file path
+    file_path = job.get("file_path")
+    if not file_path or not isinstance(file_path, str):
+        logger.error(f"Original file path not found for job {job_id}")
+        raise HTTPException(404, "Original video file not available")
+
+    # Check if original file still exists
+    if not os.path.exists(file_path):
+        logger.warning(f"Original video file no longer exists: {file_path}")
+        raise HTTPException(404, "Original video file has been deleted after processing")
+
+    logger.info(f"Serving original video file: {file_path}")
+    return FileResponse(
+        file_path,
+        media_type='video/mp4',
+        filename=f"original_{job.get('original_filename', f'video_{job_id}')}"
     )
 
 @app.get("/api/download/audio/{job_id}")
