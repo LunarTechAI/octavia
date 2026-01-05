@@ -252,11 +252,13 @@ class ApiService {
 
       let response;
       try {
-        // Add timeout to prevent hanging requests (longer for file uploads)
+        // Add timeout to prevent hanging requests (longer for file uploads and translation endpoints)
         const controller = new AbortController();
         const isFileUpload = options.body instanceof FormData;
-        const timeoutMs = isFileUpload ? 300000 : 60000; // 5 minutes for uploads, 1 minute for others
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        const isTranslationEndpoint = endpoint.includes('/translate/') || endpoint.includes('/generate/');
+        // 5 minutes for file uploads and translation endpoints, 2 minutes for others
+        const timeoutMs = (isFileUpload || isTranslationEndpoint) ? 300000 : 120000;
+        const timeoutId = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs / 1000} seconds`)), timeoutMs);
 
         response = await fetch(url, {
           ...options,
@@ -926,52 +928,50 @@ class ApiService {
   async downloadFile(jobId: string): Promise<Blob> {
     const token = this.getToken();
 
-    // First try the specific video download endpoint
-    const videoUrl = `${API_BASE_URL}/api/download/video/${jobId}`;
+    // Try endpoints in order of priority
+    const endpoints = [
+      `/api/translate/download/video/${jobId}`,  // Translation routes endpoint (has job in memory)
+      `/api/download/video/${jobId}`,             // App.py video endpoint
+      `/api/download/${jobId}`,                   // Generic fallback
+    ];
 
-    try {
-      const response = await fetch(videoUrl, {
-        headers: token ? {
-          'Authorization': `Bearer ${token}`
-        } : {},
-      });
+    for (const endpoint of endpoints) {
+      const url = `${API_BASE_URL}${endpoint}`;
+      console.log(`Trying download endpoint: ${url}`);
 
-      if (response.ok) {
-        return await response.blob();
-      }
-
-      // If 404, try the generic download endpoint
-      if (response.status === 404) {
-        const genericUrl = `${API_BASE_URL}/api/download/${jobId}`;
-        const genericResponse = await fetch(genericUrl, {
+      try {
+        const response = await fetch(url, {
           headers: token ? {
             'Authorization': `Bearer ${token}`
           } : {},
         });
 
-        if (genericResponse.ok) {
-          return await genericResponse.blob();
+        if (response.ok) {
+          console.log(`Download successful from: ${endpoint}`);
+          return await response.blob();
         }
+
+        console.log(`Endpoint ${endpoint} returned ${response.status}`);
+        
+        // Continue to next endpoint on 404
+        if (response.status === 404) {
+          continue;
+        }
+      } catch (error) {
+        console.log(`Endpoint ${endpoint} failed:`, error);
+        continue;
       }
-
-      // If still not found, try to get job details to understand what went wrong
-      const errorText = await response.text();
-      console.error(`Download failed for job ${jobId}:`, errorText);
-
-      // Try to get job status for debugging
-      try {
-        const jobStatusResponse = await this.getJobStatus(jobId);
-        console.log('Job status for debugging:', jobStatusResponse);
-      } catch (statusError) {
-        console.error('Failed to get job status for debugging:', statusError);
-      }
-
-      throw new Error(`Download failed: ${response.status} ${response.statusText} - ${errorText}`);
-
-    } catch (error) {
-      console.error('Download file error:', error);
-      throw new Error(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+
+    // All endpoints failed - try to get job status for debugging
+    try {
+      const jobStatusResponse = await this.getJobStatus(jobId);
+      console.log('Job status for debugging:', jobStatusResponse);
+    } catch (statusError) {
+      console.error('Failed to get job status for debugging:', statusError);
+    }
+
+    throw new Error(`Download failed: All endpoints returned 404 for job ${jobId}`);
   }
 
   // Download any file by URL
@@ -1292,4 +1292,3 @@ export const safeApiResponse = <T>(response: ApiResponse<T> | null, defaultValue
 export const isSuccess = (response: ApiResponse | null): response is ApiResponse => {
   return response !== null && response.success === true;
 };
-

@@ -59,11 +59,31 @@ export default function TranslationProgressPage() {
             const response = await api.getJobStatus(jobId);
             console.log("API Response:", response);
 
+            // Handle error responses first
+            if (response.success === false && response.error) {
+                console.error("API Error:", response.error);
+                // If it's an auth error, we might want to handle it differently
+                if (response.error.includes('Authentication')) {
+                    setJobData({ status: "failed", error: "Authentication required. Please log in again." });
+                    if (intervalRef.current) {
+                        clearInterval(intervalRef.current);
+                        intervalRef.current = null;
+                    }
+                }
+                return;
+            }
+
             // Check if response has data property (ApiResponse structure) or direct data
             const jobDataResponse = response.data || response;
             console.log("Job data extracted:", jobDataResponse);
 
-            if (response.success || jobDataResponse.job_id) {
+            // Validate we have usable job data
+            const hasValidData = response.success || 
+                                 jobDataResponse.job_id || 
+                                 jobDataResponse.status ||
+                                 typeof jobDataResponse.progress === 'number';
+
+            if (hasValidData) {
                 setJobData(jobDataResponse);
                 setProgress(jobDataResponse.progress || 0);
                 console.log("Updated jobData:", jobDataResponse);
@@ -108,7 +128,8 @@ export default function TranslationProgressPage() {
                     }
                 }
             } else {
-                console.error("Invalid response structure:", response);
+                console.warn("Invalid or empty response structure:", response);
+                // Don't stop polling for invalid responses - might be temporary
             }
         } catch (error) {
             console.error("Error fetching job status:", error);

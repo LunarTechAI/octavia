@@ -4,13 +4,27 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import List
-from transformers import pipeline, MarianMTModel, MarianTokenizer
+# from transformers import pipeline, MarianMTModel, MarianTokenizer  # Import on demand
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# Global cache for translators
+translator_cache = {}
+
 def get_translator(source_lang: str, target_lang: str):
 	"""Get translator model from cache or load it"""
+	try:
+		from transformers import MarianMTModel, MarianTokenizer
+	except ImportError:
+		return None
+
+	# Local definition to avoid import issues
+	HELSINKI_MODELS = {
+		"en-es": "Helsinki-NLP/opus-mt-en-es",
+		"es-en": "Helsinki-NLP/opus-mt-es-en",
+	}
+
 	model_key = f"{source_lang}-{target_lang}"
 	if model_key not in translator_cache:
 		if model_key not in HELSINKI_MODELS:
@@ -19,6 +33,7 @@ def get_translator(source_lang: str, target_lang: str):
 			model_name = HELSINKI_MODELS[model_key]
 			tokenizer = MarianTokenizer.from_pretrained(model_name)
 			model = MarianMTModel.from_pretrained(model_name)
+			from transformers import pipeline
 			translator_cache[model_key] = pipeline("translation", model=model, tokenizer=tokenizer)
 		except Exception as e:
 			logger.error(f"Failed to load translator {model_key}: {e}")

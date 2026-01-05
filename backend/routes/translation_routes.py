@@ -11,6 +11,7 @@ import os
 import uuid
 import json
 from datetime import datetime
+from config import DEMO_MODE
 try:
     from modules.subtitle_generator import SubtitleGenerator
     from modules.subtitle_translator import SubtitleTranslator
@@ -23,7 +24,7 @@ except Exception as e:
     # Dummy classes to prevent NameError in endpoints
     class SubtitleGenerator:
         def __init__(self, *args, **kwargs): pass
-    class SubtitleTranslator: 
+    class SubtitleTranslator:
         def __init__(self, *args, **kwargs): pass
     class AudioTranslator:
         def __init__(self, *args, **kwargs): pass
@@ -31,115 +32,65 @@ except Exception as e:
         def __init__(self, *args, **kwargs): pass
         def load_models(self): return False
 
+# Utility functions
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to prevent path traversal and invalid characters"""
+    import re
+    # Remove or replace invalid characters
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # Remove leading/trailing dots and spaces
+    filename = filename.strip(' .')
+    # Ensure it's not empty
+    if not filename:
+        filename = "file"
+    return filename
+
+def validate_file_size(file_path: str, file_type: str):
+    """Validate file size limits"""
+    max_sizes = {
+        "video": 500 * 1024 * 1024,  # 500MB
+        "audio": 100 * 1024 * 1024,  # 100MB
+        "subtitle": 10 * 1024 * 1024  # 10MB
+    }
+    max_size = max_sizes.get(file_type, 50 * 1024 * 1024)  # Default 50MB
+
+    file_size = os.path.getsize(file_path)
+    if file_size > max_size:
+        os.remove(file_path)  # Clean up
+        raise HTTPException(400, f"File too large. Maximum size for {file_type} is {max_size // (1024*1024)}MB.")
+
+def save_translation_jobs():
+    """Save translation jobs to file (placeholder)"""
+    pass
+
+# Import timeout utilities
+try:
+    from services.timeout_utils import run_with_timeout, JobTimeoutException, JOB_TIMEOUT_SECONDS
+except ImportError:
+    # Fallback timeout implementation
+    import asyncio
+    JOB_TIMEOUT_SECONDS = 300  # 5 minutes
+
+    class JobTimeoutException(Exception):
+        pass
+
+    async def run_with_timeout(coro, timeout_seconds):
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            raise JobTimeoutException()
+
 
 # Import shared dependencies
 from shared_dependencies import User, get_current_user, get_current_user_id, supabase
+from services.job_storage import job_storage
+from app import jobs_db
 import os
 
+# Local job storage for translation routes
+translation_jobs = {}
+
 router = APIRouter(prefix="/api/translate", tags=["translation"])
-
-# In-memory job tracking
-TRANSLATION_JOBS_FILE = "translation_jobs.json"
-
-def load_translation_jobs():
-    if os.path.exists(TRANSLATION_JOBS_FILE):
-        try:
-            with open(TRANSLATION_JOBS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Warning: Failed to load translation jobs from file: {e}")
-    return {}
-
-def save_translation_jobs():
-    try:
-        with open(TRANSLATION_JOBS_FILE, "w", encoding="utf-8") as f:
-            json.dump(translation_jobs, f, indent=2)
-    except Exception as e:
-        print(f"Warning: Failed to save translation jobs to file: {e}")
-
-translation_jobs = load_translation_jobs()
-
-# Timeout configuration
-JOB_TIMEOUT_SECONDS = 3600  # 1 hour max for translation jobs
-
-class JobTimeoutException(Exception):
-    """Raised when a job exceeds its time limit"""
-    pass
-
-async def run_with_timeout(coro, timeout_seconds):
-    """Run a coroutine with a timeout"""
-    import asyncio
-    try:
-        return await asyncio.wait_for(coro, timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        raise JobTimeoutException(f"Operation exceeded {timeout_seconds} second timeout")
-
-# File size limits (in bytes)
-MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
-MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100MB
-MAX_SUBTITLE_SIZE = 10 * 1024 * 1024  # 10MB
-
-def sanitize_filename(filename: str) -> str:
-    """Sanitize filename to prevent path traversal attacks"""
-    if not filename:
-        return "unknown"
-
-    # Remove any path separators
-    filename = filename.replace("\\", "/").split("/")[-1]
-    # Remove any dangerous characters
-    import re
-    filename = re.sub(r'[<>:"|?*]', '', filename)
-    # Ensure it starts with safe characters
-    filename = filename.lstrip(".")
-    return filename or "file"
-
-def validate_file_size(file_path: str, file_type: str) -> bool:
-    """Validate file size against allowed limits"""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-
-    file_size = os.path.getsize(file_path)
-
-    if file_type == "video" and file_size > MAX_VIDEO_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Video file too large. Maximum size is {MAX_VIDEO_SIZE // (1024*1024)}MB"
-        )
-    elif file_type == "audio" and file_size > MAX_AUDIO_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Audio file too large. Maximum size is {MAX_AUDIO_SIZE // (1024*1024)}MB"
-        )
-    elif file_type == "subtitle" and file_size > MAX_SUBTITLE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Subtitle file too large. Maximum size is {MAX_SUBTITLE_SIZE // (1024*1024)}MB"
-        )
-
-    return True
-
-# Helper function to save job to Supabase for persistence
-def save_job_to_supabase(job_data: dict):
-    """Save job to Supabase for persistence across server restarts"""
-    try:
-        supabase.table("translation_jobs").upsert(job_data, on_conflict="id").execute()
-    except Exception as e:
-        print(f"Warning: Failed to save job to Supabase: {e}")
-    
-    # Always save to local JSON as fallback
-    save_translation_jobs()
-
-# Helper function to load jobs from Supabase
-def load_jobs_from_supabase(user_id: str):
-    """Load user's jobs from Supabase"""
-    try:
-        response = supabase.table("translation_jobs").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-        if response.data:
-            return response.data
-        return []
-    except Exception as e:
-        print(f"Warning: Failed to load jobs from Supabase: {e}")
-        return []
 
 # Use Pydantic model for query parameters to avoid FastAPI validation issues
 class SubtitleTranslationQuery(BaseModel):
@@ -159,7 +110,6 @@ async def translate_subtitle_file(
 ):
     """Translate existing subtitle file to another language"""
     try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
         is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
         # Only check credits for real users
         if not is_demo_user:
@@ -238,7 +188,6 @@ async def generate_subtitles(
 ):
     """Generate subtitles from video/audio file"""
     try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
         is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
         # Only check credits for real users
         if not is_demo_user:
@@ -280,11 +229,10 @@ async def generate_subtitles(
             "user_email": current_user.email,
             "created_at": datetime.utcnow().isoformat()
         }
-        translation_jobs[job_id] = job_data
-
-        # Save to Supabase for persistence
-        save_job_to_supabase(job_data)
-        save_translation_jobs()
+        # Store in local dict for background task updates
+        translation_jobs[job_id] = job_data.copy()
+        # Also store in Supabase for persistence
+        await job_storage.create_job(job_data)
 
         # Process in background
         background_tasks.add_task(
@@ -322,7 +270,6 @@ async def translate_audio(
 ):
     """Translate audio file to another language (audio-only translation)"""
     try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
         is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
         # Only check credits for real users
         if not is_demo_user:
@@ -350,7 +297,7 @@ async def translate_audio(
 
         # Create job entry
         job_id = str(uuid.uuid4())
-        translation_jobs[job_id] = {
+        job_data = {
             "id": job_id,
             "type": "audio",
             "status": "processing",
@@ -363,6 +310,10 @@ async def translate_audio(
             "created_at": datetime.utcnow().isoformat(),
             "message": "Starting audio translation..."
         }
+        # Store in local dict for background task updates
+        translation_jobs[job_id] = job_data.copy()
+        # Also store in Supabase for persistence
+        await job_storage.create_job(job_data)
 
         # Process in background
         background_tasks.add_task(
@@ -393,7 +344,6 @@ async def translate_audio(
 async def download_subtitle_file(file_id: str, current_user: User = Depends(get_current_user)):
     """Download translated subtitle file by file_id"""
     try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
         is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
 
         output_dir = "backend/outputs/subtitles"
@@ -549,7 +499,7 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
             raise ValueError(f"Subtitle generation failed: {result.get('error', 'Unknown error')}")
 
         # Update job with results
-        translation_jobs[job_id].update({
+        update_data = {
             "status": "completed",
             "progress": 100,
             "result": {
@@ -560,7 +510,10 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
             },
             "completed_at": datetime.utcnow().isoformat(),
             "output_path": f"subtitles_{job_id}.srt" if format == "srt" else f"subtitles_{job_id}.{format}"
-        })
+        }
+        translation_jobs[job_id].update(update_data)
+        # Also update in Supabase for review endpoint
+        await job_storage.complete_job(job_id, update_data)
         save_translation_jobs()
 
         # Save the generated subtitles
@@ -601,27 +554,26 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
             pass  # Silent failure for refund
 
 @router.get("/jobs/{job_id}/status")
-async def get_job_status(job_id: str, current_user_id: str = Depends(get_current_user_id)):
+async def get_job_status(job_id: str, current_user: User = Depends(get_current_user)):
     """Get status of a translation job"""
-    # Check both translation_jobs and jobs_db (from app.py)
+    current_user_id = current_user.id
+    is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
+    
+    # Check both translation_jobs and jobs_db (from app.py), and job_storage for demo users
     job = None
     job_source = None
 
     if job_id in translation_jobs:
         job = translation_jobs[job_id]
         job_source = "translation_jobs"
+    elif job_id in jobs_db:
+        job = jobs_db[job_id]
+        job_source = "jobs_db"
     else:
-        # Try to access jobs_db from the global app context to avoid import issues
-        import sys
-        jobs_db = None
-        for module_name, module in sys.modules.items():
-            if (module_name in ('app', '__main__') and hasattr(module, 'jobs_db')):
-                jobs_db = module.jobs_db
-                break
-
-        if jobs_db and job_id in jobs_db:
-            job = jobs_db[job_id]
-            job_source = "jobs_db"
+        # Check job_storage (handles demo users with local storage)
+        job = await job_storage.get_job(job_id)
+        if job:
+            job_source = "job_storage"
 
     if not job:
         # Enhanced error response with debugging information
@@ -710,113 +662,20 @@ async def get_job_status(job_id: str, current_user_id: str = Depends(get_current
             "chunk_size": job.get("chunk_size", 30)
         })
 
-    # Return proper ApiResponse structure
+    # Return response structure matching frontend expectations
     return {
         "success": True,
-        "data": response_data
+        **response_data
     }
 
 @router.get("/jobs/history")
 async def get_user_job_history(current_user: User = Depends(get_current_user)):
     """Get user's job history"""
-    DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
-    is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
-    user_jobs = []
- 
-    # Get jobs from translation_jobs
-    for job_id, job_data in translation_jobs.items():
-        if job_data.get("user_id") == current_user.id:
-            user_jobs.append({
-                "id": job_id,
-                "type": job_data.get("type", "unknown"),
-                "status": job_data.get("status", "unknown"),
-                "progress": job_data.get("progress", 0),
-                "file_path": job_data.get("file_path"),
-                "target_language": job_data.get("target_language"),
-                "original_filename": job_data.get("original_filename"),
-                "created_at": job_data.get("created_at"),
-                "completed_at": job_data.get("completed_at"),
-                "result": job_data.get("result", {}),
-                "output_path": job_data.get("output_path"),
-                "error": job_data.get("error"),
-                "message": job_data.get("message")
-            })
-
-    # Get jobs from jobs_db (video/audio jobs from app.py)
-    import sys
-    app_jobs_db = {}
-    for module_name, module in sys.modules.items():
-        if (module_name in ('app', '__main__') and hasattr(module, 'jobs_db')):
-            app_jobs_db = module.jobs_db
-            break
+    user_jobs = await job_storage.get_user_jobs(current_user.id)
     
-    jobs_db_count = 0
-    for job_id, job_data in app_jobs_db.items():
-        if job_data.get("user_id") == current_user.id:
-            user_jobs.append({
-                "id": job_id,
-                "type": job_data.get("type", "unknown"),
-                "status": job_data.get("status", "unknown"),
-                "progress": job_data.get("progress", 0),
-                "file_path": job_data.get("file_path"),
-                "target_language": job_data.get("target_language"),
-                "original_filename": job_data.get("original_filename"),
-                "created_at": job_data.get("created_at"),
-                "completed_at": job_data.get("completed_at"),
-                "result": job_data.get("result", {}),
-                "output_path": job_data.get("output_path"),
-                "error": job_data.get("error"),
-                "message": job_data.get("message")
-            })
-            jobs_db_count += 1
-
-    # Get jobs from Supabase (persistent storage)
-    try:
-        response = supabase.table("translation_jobs").select("*").eq("user_id", current_user.id).order("created_at", desc=True).execute()
-        if response.data:
-            supabase_jobs = response.data
-            for job_data in supabase_jobs:
-                user_jobs.append({
-                    "id": job_data.get("id", ""),
-                    "type": job_data.get("type", "unknown"),
-                    "status": job_data.get("status", "unknown"),
-                    "progress": job_data.get("progress", 0),
-                    "file_path": job_data.get("file_path"),
-                    "target_language": job_data.get("target_language"),
-                    "original_filename": job_data.get("original_filename"),
-                    "created_at": job_data.get("created_at"),
-                    "completed_at": job_data.get("completed_at"),
-                    "result": job_data.get("result", {}),
-                    "output_path": job_data.get("output_path"),
-                    "error": job_data.get("error"),
-                    "message": job_data.get("message")
-                })
-    except Exception as e:
-        print(f"Warning: Failed to load jobs from Supabase: {e}")
-
-    print(f"DEBUG: Job History Aggregation for {current_user.email}:")
-    print(f"  - translation_jobs (memory): {len(translation_jobs)} total, {sum(1 for j in translation_jobs.values() if j.get('user_id') == current_user.id)} for user")
-    print(f"  - jobs_db (memory): {len(app_jobs_db)} total, {jobs_db_count} for user")
-    print(f"  - Final combined count: {len(user_jobs)}")
-
-    # Remove duplicates (keep Supabase versions if they exist)
-    seen_ids = set()
-    unique_jobs = []
-    for job in reversed(user_jobs):
-        job_id = job.get("id")
-        if job_id and job_id not in seen_ids:
-            seen_ids.add(job_id)
-            unique_jobs.append(job)
-
-    # Sort by creation date (newest first)
-    unique_jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-
     return {
-        "success": True, 
-        "data": {
-            "jobs": unique_jobs,
-            "total": len(unique_jobs)
-        }
+        "success": True,
+        "data": user_jobs
     }
 
 @router.post("/video")
@@ -828,7 +687,6 @@ async def translate_video(
 ):
     """Basic video translation - direct processing"""
     try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
         is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
         # Only check credits for real users
         if not is_demo_user:
@@ -1283,11 +1141,58 @@ async def process_video_job(job_id, file_path, target_language, user_id):
         except Exception as cleanup_error:
             print(f"Warning: Failed to cleanup temp file {file_path} after error: {cleanup_error}")
 
+@router.get("/download/video/{job_id}")
+async def download_translated_video(job_id: str, current_user: User = Depends(get_current_user)):
+    """Download translated video file directly from translation_routes"""
+    print(f"[TRANSLATE_ROUTES DOWNLOAD] Request for job {job_id}")
+    print(f"[TRANSLATE_ROUTES DOWNLOAD] translation_jobs has {len(translation_jobs)} jobs")
+    print(f"[TRANSLATE_ROUTES DOWNLOAD] jobs_db has {len(jobs_db)} jobs")
+    
+    is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
+    job = None
+    
+    # Check translation_jobs first (local dict)
+    if job_id in translation_jobs:
+        job = translation_jobs[job_id]
+        print(f"[TRANSLATE_ROUTES DOWNLOAD] Found in translation_jobs")
+    elif job_id in jobs_db:
+        job = jobs_db[job_id]
+        print(f"[TRANSLATE_ROUTES DOWNLOAD] Found in jobs_db")
+    
+    if not job:
+        print(f"[TRANSLATE_ROUTES DOWNLOAD] Job not found!")
+        raise HTTPException(404, "Job not found in translation_routes")
+    
+    if job.get("status") != "completed":
+        raise HTTPException(400, f"Job not ready. Status: {job.get('status')}")
+    
+    # Find the video file
+    output_path = job.get("output_path") or job.get("result", {}).get("output_path")
+    print(f"[TRANSLATE_ROUTES DOWNLOAD] output_path: {output_path}")
+    
+    if output_path and os.path.exists(output_path):
+        print(f"[TRANSLATE_ROUTES DOWNLOAD] Serving: {output_path}")
+        return FileResponse(output_path, media_type="video/mp4", filename=f"translated_{job_id}.mp4")
+    
+    # Try standard locations
+    possible_paths = [
+        f"backend/outputs/translated_video_{job_id}.mp4",
+        f"outputs/translated_video_{job_id}.mp4",
+        f"translated_video_{job_id}.mp4"
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            print(f"[TRANSLATE_ROUTES DOWNLOAD] Found at: {path}")
+            return FileResponse(path, media_type="video/mp4", filename=f"translated_{job_id}.mp4")
+    
+    print(f"[TRANSLATE_ROUTES DOWNLOAD] File not found at any location")
+    raise HTTPException(404, "Video file not found")
+
 @router.get("/download/{file_type}/{file_id}")
 async def download_file(file_type: str, file_id: str, current_user: User = Depends(get_current_user)):
     """Download generated files"""
     try:
-        DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
         is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
         print(f"Download request: type={file_type}, id={file_id}, user_id={current_user.id}")
 

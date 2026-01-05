@@ -1,6 +1,12 @@
 """
 Shared dependencies and utilities for the Octavia backend
 """
+import os
+from dotenv import load_dotenv
+
+# Load environment variables early
+load_dotenv()
+
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
@@ -10,7 +16,6 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from supabase import create_client, Client
-import os
 
 # Configuration from environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -24,7 +29,6 @@ DEMO_MODE_ENV = os.getenv("DEMO_MODE", "false")
 print(f"DEBUG: DEMO_MODE environment variable: '{DEMO_MODE_ENV}'")
 print(f"DEBUG: DEMO_MODE parsed: {DEMO_MODE_ENV.lower() == 'true'}")
 
-# Initialize Supabase client
 # Initialize Supabase client
 try:
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
