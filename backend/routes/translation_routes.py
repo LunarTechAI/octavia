@@ -719,10 +719,29 @@ async def translate_video(
         if is_demo_user:
             pass
         else:
-            supabase.table("users").update({"credits": current_user.credits - 10}).eq("id", current_user.id).execute()
+            from services.db_utils import with_retry
+            async def deduct_credits():
+                return supabase.table("users").update({"credits": current_user.credits - 10}).eq("id", current_user.id).execute()
+            await with_retry(deduct_credits)
 
         # Create job entry - use global jobs_db to ensure download endpoints can find it
         job_id = str(uuid.uuid4())
+        job_data = {
+            "id": job_id,
+            "type": "video",
+            "status": "processing",
+            "progress": 0,
+            "file_path": file_path,
+            "target_language": target_language,
+            "original_filename": file.filename,
+            "user_id": current_user.id,
+            "user_email": current_user.email,
+            "created_at": datetime.utcnow().isoformat(),
+            "message": "Starting video translation..."
+        }
+
+        # Store in Supabase via job_storage (handles demo/non-demo split automatically)
+        await job_storage.create_job(job_data)
 
         # Access jobs_db from the global app context to avoid import issues
         import sys
@@ -733,19 +752,7 @@ async def translate_video(
                 break
 
         if jobs_db is not None:
-            jobs_db[job_id] = {
-                "id": job_id,
-                "type": "video",
-                "status": "processing",
-                "progress": 0,
-                "file_path": file_path,
-                "target_language": target_language,
-                "original_filename": file.filename,
-                "user_id": current_user.id,
-                "user_email": current_user.email,
-                "created_at": datetime.utcnow().isoformat(),
-                "message": "Starting video translation..."
-            }
+            jobs_db[job_id] = job_data.copy()
             print(f"Created video job {job_id} in global jobs_db")
             # Trigger save in app.py if possible
             try:
@@ -757,19 +764,7 @@ async def translate_video(
                 pass
         else:
             # Fallback to local storage if jobs_db not accessible
-            translation_jobs[job_id] = {
-                "id": job_id,
-                "type": "video",
-                "status": "processing",
-                "progress": 0,
-                "file_path": file_path,
-                "target_language": target_language,
-                "original_filename": file.filename,
-                "user_id": current_user.id,
-                "user_email": current_user.email,
-                "created_at": datetime.utcnow().isoformat(),
-                "message": "Starting video translation..."
-            }
+            translation_jobs[job_id] = job_data.copy()
             print(f"Created video job {job_id} in local translation_jobs (fallback)")
             save_translation_jobs()
 
@@ -820,6 +815,67 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
 
         # Process audio
         result = translator.process_audio(file_path)
+        
+        # Quality validation
+        translation_jobs[job_id]["progress"] = 90
+        translation_jobs[job_id]["message"] = "Validating audio quality..."
+        
+        try:
+            from services.audio_quality import AudioQualityValidator, QualityValidationError
+            
+            validator = AudioQualityValidator(
+                tolerance_ms=200,
+                min_snr_db=20.0,
+                max_silence_percentage=10.0
+            )
+            
+            # Run comprehensive quality validation
+            validation_result = validator.validate_all(
+                original_path=file_path,
+                translated_path=result.output_path,
+                normalize=True  # Apply gain normalization
+            )
+            
+            # Store quality metrics
+            quality_metrics = validation_result.to_dict()
+            
+            if not validation_result.is_valid:
+                # Quality validation failed
+                error_msg = f"Quality validation failed: {', '.join(validation_result.failures)}"
+                logger.error(f"Job {job_id}: {error_msg}")
+                
+                translation_jobs[job_id].update({
+                    "status": "failed",
+                    "progress": 100,
+                    "error": error_msg,
+                    "quality_metrics": quality_metrics,
+                    "quality_passed": False,
+                    "failed_at": datetime.utcnow().isoformat()
+                })
+                
+                save_translation_jobs()
+                
+                # Refund credits on quality failure
+                try:
+                    from services.db_utils import with_retry
+                    
+                    async def perform_refund():
+                        response = supabase.table("users").select("credits").eq("id", user_id).execute()
+                        if response.data:
+                            current_credits = response.data[0]["credits"]
+                            return supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
+                        return None
+                        
+                    await with_retry(perform_refund)
+                    logger.info(f"Refunded 10 credits to user {user_id} due to quality validation failure")
+                except Exception as refund_error:
+                    logger.error(f"Failed to refund credits: {refund_error}")
+                
+                return
+                
+        except Exception as validation_error:
+            logger.warning(f"Quality validation error (continuing anyway): {validation_error}")
+            quality_metrics = {"error": str(validation_error)}
 
         # Update job with results
         translation_jobs[job_id].update({
@@ -831,7 +887,9 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
                 "speed_adjustment": result.speed_adjustment
             },
             "completed_at": datetime.utcnow().isoformat(),
-            "output_path": result.output_path  # Use the actual output path from translator
+            "output_path": result.output_path,  # Use the actual output path from translator
+            "quality_metrics": quality_metrics,
+            "quality_passed": validation_result.is_valid if 'validation_result' in locals() else None
         })
 
         save_translation_jobs()
@@ -856,11 +914,17 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
 
         # Refund credits on failure
         try:
-            response = supabase.table("users").select("credits").eq("id", user_id).execute()
-            if response.data:
-                current_credits = response.data[0]["credits"]
-                supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
-                print(f"Refunded 10 credits to user {user_id} due to audio translation failure")
+            from services.db_utils import with_retry
+            
+            async def perform_refund():
+                response = supabase.table("users").select("credits").eq("id", user_id).execute()
+                if response.data:
+                    current_credits = response.data[0]["credits"]
+                    return supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
+                return None
+                
+            await with_retry(perform_refund)
+            print(f"Refunded 10 credits to user {user_id} due to audio translation failure")
         except Exception as refund_error:
             print(f"Failed to refund credits: {refund_error}")
 
@@ -886,6 +950,10 @@ async def process_video_job(job_id, file_path, target_language, user_id):
 
         jobs_db[job_id]["progress"] = 10
         jobs_db[job_id]["message"] = "Loading AI models..."
+        
+        # Sync with job_storage
+        await job_storage.update_progress(job_id, 10, "Loading AI models...")
+        await job_storage.update_status(job_id, "processing")
 
         # DEMO_MODE: Simulate video processing without heavy ML
         # Try to use the full AI pipeline if available, otherwise fall back to simulation
@@ -918,17 +986,25 @@ async def process_video_job(job_id, file_path, target_language, user_id):
                     jobs_db[job_id]["message"] = "Translation completed!"
                     jobs_db[job_id]["completed_at"] = datetime.utcnow().isoformat()
                     jobs_db[job_id]["output_path"] = result
-                    jobs_db[job_id]["result"] = {
-                        "success": True,
-                        "output_path": result,
-                        "message": "Full translation successful"
-                    }
+                    
+                    # Update job_storage
+                    await job_storage.complete_job(job_id, {
+                        "message": "Translation completed!",
+                        "result": {
+                            "success": True,
+                            "output_path": result,
+                            "message": "Full translation successful"
+                        }
+                    }, output_path=result)
                 else:
                     raise Exception("Pipeline returned no result")
                     
-                # Clean up input
+                # Clean up input - DISABLED to support side-by-side player
                 if os.path.exists(file_path):
-                    try: os.remove(file_path)
+                    try: 
+                        # os.remove(file_path)
+                        print(f"DEBUG: Preserving input file at {file_path}")
+                        pass
                     except: pass
                 
                 # Persistence triggers
@@ -989,15 +1065,23 @@ async def process_video_job(job_id, file_path, target_language, user_id):
         jobs_db[job_id]["message"] = "Translation completed!"
         jobs_db[job_id]["completed_at"] = datetime.utcnow().isoformat()
         jobs_db[job_id]["output_path"] = output_path
-        jobs_db[job_id]["result"] = {
-            "success": True,
-            "output_path": output_path,
-            "message": "Basic translation successful"
-        }
         
-        # Clean up input
+        # Update job_storage
+        await job_storage.complete_job(job_id, {
+            "message": "Translation completed!",
+            "result": {
+                "success": True,
+                "output_path": output_path,
+                "message": "Basic translation successful"
+            }
+        }, output_path=output_path)
+        
+        # Clean up input - DISABLED to support side-by-side player
         if os.path.exists(file_path):
-            try: os.remove(file_path)
+            try: 
+                # os.remove(file_path)
+                print(f"DEBUG: Preserving input file at {file_path}")
+                pass
             except: pass
             
         # Persistence triggers
@@ -1046,6 +1130,14 @@ async def process_video_job(job_id, file_path, target_language, user_id):
             jobs_db[job_id].update({
                 "status": "completed",
                 "progress": 100,
+                "completed_at": datetime.utcnow().isoformat(),
+                "output_path": output_path,
+                "output_video": output_path
+            })
+            
+            # Update job_storage
+            await job_storage.complete_job(job_id, {
+                "message": "Video translation completed with full AI processing",
                 "result": {
                     "success": True,
                     "output_path": output_path,
@@ -1054,11 +1146,8 @@ async def process_video_job(job_id, file_path, target_language, user_id):
                     "total_chunks": result.get("total_chunks", 0),
                     "processing_time_s": result.get("processing_time_s", 0),
                     "message": "Video translation completed with full AI processing"
-                },
-                "completed_at": datetime.utcnow().isoformat(),
-                "output_path": output_path,
-                "output_video": output_path
-            })
+                }
+            }, output_path=output_path)
 
             print(f"Video translation job {job_id} completed successfully - output: {output_path}")
             print(f"Processed {result.get('chunks_processed', 0)}/{result.get('total_chunks', 0)} chunks")
@@ -1072,22 +1161,25 @@ async def process_video_job(job_id, file_path, target_language, user_id):
             jobs_db[job_id].update({
                 "status": "failed",
                 "error": error_msg,
-                "failed_at": datetime.utcnow().isoformat(),
-                "result": {
-                    "success": False,
-                    "error": error_msg,
-                    "output_path": None,
-                    "target_language": target_language
-                }
+                "failed_at": datetime.utcnow().isoformat()
             })
+            
+            # Update job_storage
+            await job_storage.fail_job(job_id, error_msg)
 
             # Refund credits on failure
             try:
-                response = supabase.table("users").select("credits").eq("id", user_id).execute()
-                if response.data:
-                    current_credits = response.data[0]["credits"]
-                    supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
-                    print(f"Refunded 10 credits to user {user_id} due to video translation failure")
+                from services.db_utils import with_retry
+                
+                async def perform_refund():
+                    response = supabase.table("users").select("credits").eq("id", user_id).execute()
+                    if response.data:
+                        current_credits = response.data[0]["credits"]
+                        return supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
+                    return None
+                    
+                await with_retry(perform_refund)
+                print(f"Refunded 10 credits to user {user_id} due to video translation failure")
             except Exception as refund_error:
                 print(f"Failed to refund credits: {refund_error}")
 
@@ -1113,24 +1205,25 @@ async def process_video_job(job_id, file_path, target_language, user_id):
             jobs_db[job_id].update({
                 "status": "failed",
                 "error": error_msg,
-                "failed_at": datetime.utcnow().isoformat(),
-                "result": {
-                    "success": False,
-                    "error": error_msg,
-                    "output_path": None,
-                    "target_language": target_language
-                }
+                "failed_at": datetime.utcnow().isoformat()
             })
+            
+            # Update job_storage
+            await job_storage.fail_job(job_id, error_msg)
         except:
             pass  # jobs_db access failed
 
         # Refund credits on failure
         try:
-            response = supabase.table("users").select("credits").eq("id", user_id).execute()
-            if response.data:
-                current_credits = response.data[0]["credits"]
-                supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
-                print(f"Refunded 10 credits to user {user_id} due to video translation failure")
+            from services.db_utils import with_retry
+            async def perform_refund():
+                response = supabase.table("users").select("credits").eq("id", user_id).execute()
+                if response.data:
+                    current_credits = response.data[0]["credits"]
+                    return supabase.table("users").update({"credits": current_credits + 10}).eq("id", user_id).execute()
+                return None
+            await with_retry(perform_refund)
+            print(f"Refunded 10 credits to user {user_id} due to video translation failure")
         except Exception as refund_error:
             print(f"Failed to refund credits: {refund_error}")
 

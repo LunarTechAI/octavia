@@ -171,7 +171,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(H
 
     # Normal mode: fetch user from Supabase
     try:
-        response = supabase.table("users").select("*").eq("id", user_id).execute()
+        from services.db_utils import with_retry
+        
+        async def fetch_user():
+            return supabase.table("users").select("*").eq("id", user_id).execute()
+            
+        response = await with_retry(fetch_user)
+        
         if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -190,8 +196,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(H
     except HTTPException:
         raise
     except Exception as db_error:
-        print(f"Database error: {db_error}")
+        print(f"Database error after retries: {db_error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching user data",
+            detail="Error fetching user data from database",
         )

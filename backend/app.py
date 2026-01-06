@@ -183,8 +183,10 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router)
 from routes.translation_routes import router as translation_router
+from routes.payment_routes import router as payment_router
 # Note: translation_router already has prefix="/api/translate" defined, so don't add it again
 app.include_router(translation_router)
+app.include_router(payment_router)
 
 # Utility functions
 async def refund_credits(user_id: str, amount: int, reason: str = "job failure"):
@@ -1053,6 +1055,129 @@ async def download_video(
     print(f"[VIDEO DOWNLOAD] Video file not found for job {job_id}")
     raise HTTPException(404, f"Video file not found. Searched: {possible_paths}")
 
+@app.get("/api/progress/{job_id}")
+async def get_job_progress(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get real-time progress for a translation job (lightweight polling endpoint)"""
+    try:
+        from services.db_utils import with_retry
+        
+        # Try job_storage first (handles both demo and regular users)
+        async def fetch_job():
+            return await job_storage.get_job(job_id)
+        
+        job = await with_retry(fetch_job)
+        
+        # Fallback to jobs_db if not in job_storage
+        if not job and job_id in jobs_db:
+            job = jobs_db[job_id]
+        
+        if not job:
+            raise HTTPException(404, "Job not found")
+        
+        # Access control
+        if job.get("user_id") and job["user_id"] != current_user.id:
+            is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
+            if not is_demo_user:
+                raise HTTPException(403, "Access denied")
+        
+        # Return lightweight progress data
+        return {
+            "progress": job.get("progress", 0),
+            "status": job.get("status", "unknown"),
+            "message": job.get("message", ""),
+            "eta_seconds": job.get("eta_seconds"),
+            "job_id": job_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Progress fetch error for job {job_id}: {e}")
+        raise HTTPException(500, f"Failed to fetch progress: {str(e)}")
+
+
+@app.get("/api/jobs/history")
+async def get_job_history(
+    current_user: User = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    type: Optional[str] = None
+):
+    """
+    Get job history for the current user
+    For non-demo users, queries Supabase translation_jobs table
+    For demo users, returns empty list or mock data
+    """
+    try:
+        # Check if demo user
+        is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
+        
+        if is_demo_user:
+            # Demo users get empty history
+            return {
+                "success": True,
+                "jobs": [],
+                "total": 0,
+                "limit": limit,
+                "offset": offset
+            }
+        
+        # For non-demo users, query Supabase
+        from services.db_utils import with_retry
+        
+        async def fetch_jobs():
+            # Build query
+            query = supabase.table("translation_jobs").select(
+                "id, type, status, progress, target_language, original_filename, "
+                "created_at, completed_at, failed_at, error, message, "
+                "source_language, target_lang, language, format, output_format"
+            ).eq("user_id", current_user.id).order("created_at", desc=True)
+            
+            # Apply filters
+            if status:
+                query = query.eq("status", status)
+            if type:
+                query = query.eq("type", type)
+            
+            # Apply pagination
+            query = query.range(offset, offset + limit - 1)
+            
+            response = query.execute()
+            return response.data
+        
+        jobs = await with_retry(fetch_jobs)
+        
+        # Get total count
+        async def fetch_count():
+            query = supabase.table("translation_jobs").select(
+                "id", count="exact"
+            ).eq("user_id", current_user.id)
+            
+            if status:
+                query = query.eq("status", status)
+            if type:
+                query = query.eq("type", type)
+            
+            response = query.execute()
+            return response.count
+        
+        total = await with_retry(fetch_count)
+        
+        return {
+            "success": True,
+            "jobs": jobs or [],
+            "total": total or 0,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"Job history fetch error: {e}")
+        raise HTTPException(500, f"Failed to fetch job history: {str(e)}")
+
 @app.get("/api/download/original/{job_id}")
 async def download_original_video(
     job_id: str,
@@ -1061,34 +1186,75 @@ async def download_original_video(
     """Download original video file (if still available)"""
     logger.info(f"Original video download request for job {job_id}")
 
-    # Check if job exists in jobs_db
-    if job_id not in jobs_db:
-        logger.error(f"Job {job_id} not found in jobs_db")
-        raise HTTPException(404, "Job not found")
+    # Check job records (Supabase or local)
+    job = await job_storage.get_job(job_id)
+    if not job:
+        # Fallback to jobs_db
+        if job_id in jobs_db:
+            job = jobs_db[job_id]
+        else:
+            logger.error(f"Job {job_id} not found in any job store")
+            raise HTTPException(404, "Job not found")
 
-    job = jobs_db[job_id]
     logger.info(f"Job status: {job.get('status')}, user_id: {job.get('user_id')}, current_user: {current_user.id}")
 
-    if job["user_id"] != current_user.id:
-        logger.error(f"Access denied: job user {job['user_id']} != current user {current_user.id}")
-        raise HTTPException(403, "Access denied")
+    # Access control
+    if job.get("user_id") and job["user_id"] != current_user.id:
+        # Skip check for demo user if applicable
+        is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
+        if not is_demo_user:
+            logger.error(f"Access denied: job user {job.get('user_id')} != current user {current_user.id}")
+            raise HTTPException(403, "Access denied")
 
-    # Get the original file path
+    # Get the original file path from job data
     file_path = job.get("file_path")
-    if not file_path or not isinstance(file_path, str):
-        logger.error(f"Original file path not found for job {job_id}")
-        raise HTTPException(404, "Original video file not available")
+    if not file_path:
+        logger.error(f"Original file path not found in job data for {job_id}")
+        raise HTTPException(404, "Original video file record not found")
 
-    # Check if original file still exists
-    if not os.path.exists(file_path):
-        logger.warning(f"Original video file no longer exists: {file_path}")
-        raise HTTPException(404, "Original video file has been deleted after processing")
+    # Path safety and existence check - try multiple variations
+    final_path = None
+    possible_paths = [
+        file_path,                               # As stored
+        os.path.join("backend", file_path),        # Relative to project root
+        os.path.basename(file_path),             # Just the filename in current dir
+        os.path.join("octavia", "backend", file_path), # Absolute-ish
+    ]
+    
+    for path in possible_paths:
+        if path and os.path.exists(path):
+            final_path = path
+            break
+    
+    if not final_path:
+        # Attempt glob search if path variations fail
+        import glob
+        base = os.path.basename(file_path)
+        pattern = f"**/{base}"
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            final_path = matches[0]
 
-    logger.info(f"Serving original video file: {file_path}")
+    if not final_path:
+        logger.error(f"Original file not found on disk: {file_path}")
+        raise HTTPException(404, f"Original video file no longer available on server. Searched prefix of: {file_path}")
+
+    # Determine media type for original file
+    ext = os.path.splitext(final_path)[1].lower()
+    media_type = "video/mp4" # Default for original videos
+    
+    if ext in ['.mp3', '.wav', '.ogg']:
+        media_type = "audio/mpeg"
+    
+    filename = job.get("original_filename") or os.path.basename(final_path)
+    if not filename.endswith(ext):
+        filename += ext
+        
+    logger.info(f"Serving original file: {final_path} as {filename}")
     return FileResponse(
-        file_path,
-        media_type='video/mp4',
-        filename=f"original_{job.get('original_filename', f'video_{job_id}')}"
+        final_path,
+        media_type=media_type,
+        filename=filename
     )
 
 @app.get("/api/download/audio/{job_id}")
@@ -1612,55 +1778,6 @@ async def download_subtitle_file(
         filename=filename
     )
 
-@app.get("/api/download/original/{job_id}")
-async def download_original_file(
-    job_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Download the original input file for a job"""
-    # Check job storage (now uses Supabase via job_storage)
-    job = await job_storage.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found")
-
-    if not job:
-        raise HTTPException(404, "Job not found")
-
-    if job.get("user_id") != current_user.id:
-        raise HTTPException(403, "Access denied")
-
-    file_path = job.get("file_path")
-    if not file_path:
-        raise HTTPException(404, "Original file path not found in job data")
-
-    # Path safety and existence check
-    final_path = None
-    if os.path.exists(file_path):
-        final_path = file_path
-    elif os.path.exists(os.path.join("backend", file_path)):
-        final_path = os.path.join("backend", file_path)
-    elif os.path.exists(os.path.basename(file_path)):
-        final_path = os.path.basename(file_path)
-    
-    if not final_path:
-        raise HTTPException(404, f"Original file not found on server (Path: {file_path})")
-
-    # Determine media type for original file
-    ext = os.path.splitext(final_path)[1].lower()
-    media_type = "application/octet-stream"
-    if ext in ['.mp4', '.m4v', '.mov']:
-        media_type = "video/mp4"
-    elif ext in ['.mp3', '.wav', '.ogg']:
-        media_type = "audio/mpeg"
-    
-    filename = job.get("original_filename", "original_file" + ext)
-    
-    return FileResponse(
-        final_path,
-        media_type=media_type,
-        filename=f"original_{filename}"
-    )
-
 @app.get("/api/translate/subtitles/review/{job_id}")
 async def review_subtitles(
     job_id: str,
@@ -1688,19 +1805,57 @@ async def review_subtitles(
         raise HTTPException(400, "Subtitles not ready yet. Status: " + job.get("status", "unknown"))
     format = job.get("format", "srt")
     filename = job.get("filename", f"subtitles_{job_id}.{format}")
+    
+    subtitle_content = ""
+    
     try:
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
+        # Try multiple possible paths for the subtitle file
+        import glob
+        possible_paths = [
+            filename,  # Direct path from job
+            f"backend/outputs/{filename}",
+            f"outputs/{filename}",
+            f"backend/outputs/subtitles_{job_id}.{format}",
+            f"outputs/subtitles_{job_id}.{format}",
+            f"subtitles_{job_id}.{format}",
+        ]
+        
+        # Check direct paths first
+        subtitle_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                subtitle_path = path
+                print(f"[SUBTITLE REVIEW] Found subtitle file at: {path}")
+                break
+        
+        # If not found, search with glob
+        if not subtitle_path:
+            search_patterns = [
+                f"backend/outputs/*{job_id}*.{format}",
+                f"outputs/*{job_id}*.{format}",
+                f"*{job_id}*.{format}",
+            ]
+            for pattern in search_patterns:
+                matches = glob.glob(pattern)
+                if matches:
+                    subtitle_path = matches[0]
+                    print(f"[SUBTITLE REVIEW] Found subtitle file via pattern: {subtitle_path}")
+                    break
+        
+        # Read the file if found
+        if subtitle_path and os.path.exists(subtitle_path):
+            with open(subtitle_path, "r", encoding="utf-8") as f:
                 subtitle_content = f.read()
+            print(f"[SUBTITLE REVIEW] Successfully read {len(subtitle_content)} characters from {subtitle_path}")
         else:
+            # Fallback to job content
             subtitle_content = job.get("content", "")
-            if not subtitle_content and job.get("download_url"):
-                subtitle_path = filename
-                if os.path.exists(subtitle_path):
-                    with open(subtitle_path, "r", encoding="utf-8") as f:
-                        subtitle_content = f.read()
+            print(f"[SUBTITLE REVIEW] Using content from job record: {len(subtitle_content)} characters")
+            
     except Exception as e:
-        subtitle_content = ""
+        print(f"[SUBTITLE REVIEW] Error reading subtitle file: {e}")
+        subtitle_content = job.get("content", "")
+    
     return {
         "success": True,
         "data": {

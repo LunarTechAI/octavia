@@ -65,7 +65,12 @@ class JobStorage:
                 return job_id
             else:
                 # Store in Supabase for regular users
-                result = supabase.table(self.table_name).insert(job_data).execute()
+                from services.db_utils import with_retry
+                
+                async def insert_job():
+                    return supabase.table(self.table_name).insert(job_data).execute()
+                
+                result = await with_retry(insert_job)
 
                 if result.data:
                     print(f"Created job {job_id} in Supabase")
@@ -85,7 +90,12 @@ class JobStorage:
                 return self._demo_jobs[job_id].copy()
 
             # Check Supabase for regular jobs
-            result = supabase.table(self.table_name).select("*").eq("id", job_id).execute()
+            from services.db_utils import with_retry
+            
+            async def fetch_job():
+                return supabase.table(self.table_name).select("*").eq("id", job_id).execute()
+                
+            result = await with_retry(fetch_job)
             if result.data:
                 return result.data[0]
             return None
@@ -106,7 +116,12 @@ class JobStorage:
                 print(f"Found {len(demo_jobs)} demo jobs for user {user_id}")
             else:
                 # Get regular jobs from Supabase
-                result = supabase.table(self.table_name).select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+                from services.db_utils import with_retry
+                
+                async def fetch_user_jobs():
+                    return supabase.table(self.table_name).select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+                
+                result = await with_retry(fetch_user_jobs)
                 jobs.extend(result.data if result.data else [])
 
             return jobs
@@ -130,10 +145,15 @@ class JobStorage:
                 return True
             else:
                 # Update in Supabase for regular jobs
+                from services.db_utils import with_retry
+                
                 current_version = job.get("version", 0)
                 updates["version"] = current_version + 1
 
-                result = supabase.table(self.table_name).update(updates).eq("id", job_id).eq("version", current_version).execute()
+                async def perform_update():
+                    return supabase.table(self.table_name).update(updates).eq("id", job_id).eq("version", current_version).execute()
+                
+                result = await with_retry(perform_update)
 
                 return len(result.data) > 0
         except Exception as e:

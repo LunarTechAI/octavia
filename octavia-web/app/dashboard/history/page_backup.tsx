@@ -30,11 +30,8 @@ export default function JobHistoryPage() {
 
   // Fetch user's work history
   useEffect(() => {
-    console.log("JobHistoryPage: useEffect triggered, user:", user);
     if (user) {
       fetchUserHistory();
-    } else {
-      console.log("JobHistoryPage: No user found, showing login prompt");
     }
   }, [user]);
 
@@ -64,7 +61,6 @@ export default function JobHistoryPage() {
   const fetchUserHistory = async () => {
     if (!user) return;
 
-    console.log("JobHistoryPage: Starting to fetch user history");
     setLoading(true);
     try {
       // Fetch transaction history (credit purchases)
@@ -161,46 +157,48 @@ export default function JobHistoryPage() {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
-      // If no jobs found from API, use demo data
-      if (historyItems.length === 0) {
-        console.log("JobHistoryPage: No real jobs found, using demo data");
-        const demoJobs = getDemoJobs();
-        console.log("JobHistoryPage: Demo jobs:", demoJobs);
-        setJobs(demoJobs);
-      } else {
-        console.log("JobHistoryPage: Setting jobs with", historyItems.length, "real items");
-        setJobs(historyItems);
-      }
+      setJobs(historyItems);
     } catch (error) {
       console.error("Failed to fetch user history:", error);
-      console.log("JobHistoryPage: Using demo data as fallback due to error");
       // Use demo data as fallback
-      const demoJobs = getDemoJobs();
-      console.log("JobHistoryPage: Demo jobs:", demoJobs);
-      setJobs(demoJobs);
+      setJobs(getDemoJobs());
     } finally {
       setLoading(false);
     }
   };
 
   const fetchTranslationJobs = async () => {
-    console.log("JobHistoryPage: fetchTranslationJobs called");
-    // Fetch user's job history using the API service
+    // Fetch user's job history from Supabase (for non-demo users)
     try {
-      console.log("JobHistoryPage: Making API call to get user job history");
-      const response = await api.getUserJobHistory();
-
-      console.log("JobHistoryPage: API response:", response);
-
-      if (response.success && response.data && response.data.jobs) {
-        console.log(`Fetched ${response.data.jobs.length} jobs from API`);
-        return response.data.jobs;
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.warn("No auth token found");
+        return [];
       }
 
-      console.log("JobHistoryPage: No jobs found or API call failed");
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/jobs/history?limit=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.jobs) {
+        console.log(`Fetched ${data.jobs.length} jobs from Supabase`);
+        return data.jobs;
+      }
+
       return [];
     } catch (error) {
-      console.error("Failed to fetch translation jobs from API:", error);
+      console.error("Failed to fetch translation jobs from Supabase:", error);
       return [];
     }
   };
@@ -427,149 +425,4 @@ export default function JobHistoryPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-white/5 bg-white/5">
-                    <th className="p-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Job Details</th>
-                    <th className="p-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Type</th>
-                    <th className="p-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-                    <th className="p-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Date</th>
-                    <th className="p-4 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {filteredJobs.map((job) => (
-                    <motion.tr
-                      key={job.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="group hover:bg-white/5 transition-colors"
-                    >
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded bg-white/5 flex items-center justify-center border border-white/10">
-                            {job.type.includes("Video") ? (
-                              <span className="text-lg">🎬</span>
-                            ) : job.type.includes("Audio") ? (
-                              <span className="text-lg">🎙️</span>
-                            ) : job.type.includes("Credit") ? (
-                              <span className="text-lg">💰</span>
-                            ) : (
-                              <span className="text-lg">📝</span>
-                            )}
-                          </div>
-                          <div>
-                            <div className="font-medium text-white group-hover:text-primary-purple-bright transition-colors">
-                              {job.name}
-                            </div>
-                            <div className="text-xs text-slate-500">
-                              {job.id} • {job.duration}
-                              {job.description && <span className="ml-2 text-primary-purple/70">{job.description}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="text-sm text-slate-300">{job.type}</div>
-                        <div className="text-xs text-slate-500">{job.lang}</div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          {job.status === "Completed" && <CheckCircle2 className="w-4 h-4 text-green-400" />}
-                          {job.status === "Processing" && <Clock className="w-4 h-4 text-blue-400 animate-pulse" />}
-                          {job.status === "Failed" && <AlertCircle className="w-4 h-4 text-red-400" />}
-                          <span className={`text-sm font-medium ${
-                            job.status === "Completed" ? "text-green-400" :
-                            job.status === "Processing" ? "text-blue-400" : "text-red-400"
-                          }`}>
-                            {job.status}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-4 text-sm text-slate-400">{job.date}</td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {job.download_url && (
-                            <button
-                              onClick={() => handleDownload(job.id, job.download_url)}
-                              className="p-2 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                              title="Download"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            className="p-2 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                            title="View Details"
-                            onClick={() => alert(`Details for ${job.name}\nStatus: ${job.status}\nType: ${job.type}\nLanguage: ${job.lang}`)}
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Stats Summary */}
-            <div className="p-4 border-t border-white/5 flex flex-wrap items-center justify-between text-sm text-slate-500">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-green-400"></div>
-                  <span>Completed: {jobs.filter(j => j.status === "Completed").length}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-blue-400"></div>
-                  <span>Processing: {jobs.filter(j => j.status === "Processing").length}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-red-400"></div>
-                  <span>Failed: {jobs.filter(j => j.status === "Failed").length}</span>
-                </div>
-              </div>
-
-              {/* Pagination */}
-              <div className="flex gap-2">
-                <button className="px-3 py-1 rounded hover:bg-white/5 hover:text-white disabled:opacity-50" disabled>
-                  Previous
-                </button>
-                <button className="px-3 py-1 rounded hover:bg-white/5 hover:text-white">
-                  Next
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass-card p-4">
-          <div className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Total Jobs</div>
-          <div className="text-2xl font-bold text-white">{jobs.length}</div>
-          <div className="text-xs text-slate-400 mt-1">All time</div>
-        </div>
-        <div className="glass-card p-4">
-          <div className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Success Rate</div>
-          <div className="text-2xl font-bold text-green-400">
-            {jobs.length > 0
-              ? `${Math.round((jobs.filter(j => j.status === "Completed").length / jobs.length) * 100)}%`
-              : "0%"
-            }
-          </div>
-          <div className="text-xs text-slate-400 mt-1">Completed successfully</div>
-        </div>
-        <div className="glass-card p-4">
-          <div className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Recent Activity</div>
-          <div className="text-2xl font-bold text-white">
-            {jobs.length > 0 ? formatTimeAgo(jobs[0].created_at) : "No activity"}
-          </div>
-          <div className="text-xs text-slate-400 mt-1">Last job</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+            <div class

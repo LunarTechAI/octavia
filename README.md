@@ -28,23 +28,9 @@
 - ✅ **Resumability**: Checkpoint system for interrupted processing
 - ✅ **Resource Management**: Efficient memory/disk usage with cleanup
 
-### 🏗️ Architecture
+---
 
-**Backend Pipeline:**
-```
-Video Input → Audio Extraction → Chunking → STT → Translation → TTS → Sync → Merge → Video Output
-     ↓           ↓            ↓       ↓        ↓        ↓     ↓      ↓       ↓
-   FFmpeg     FFmpeg       AI      Whisper   Helsinki   Edge  pydub  FFmpeg  FFmpeg
-   (probe)    (extract)   Orchestrator (transcribe) (opus-mt) (TTS) (sync) (merge) (mux)
-```
-
-**Frontend:** Next.js 16 dashboard with advanced features:
-- Real-time progress tracking
-- Side-by-side video player with A/B audio switching
-- Responsive glass-morphism UI design
-- Professional video comparison tools
-
-## 🚀 Quick Start
+## 🚀 Quick Start (For Mentors & Evaluators)
 
 ### Prerequisites
 - **OS**: Windows 11 (tested), macOS 11+, Ubuntu 20.04+
@@ -55,7 +41,7 @@ Video Input → Audio Extraction → Chunking → STT → Translation → TTS �
 
 ### One-Command Setup & Run
 
-#### Backend Setup
+#### Backend Setup (Recommended for Evaluation)
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -71,9 +57,9 @@ npm run dev  # Development server at http://localhost:3000
 
 #### Full Application (Recommended)
 ```bash
-# Terminal 1: Backend API
+# Terminal 1: Backend API (with demo mode for evaluation)
 cd backend
-python -m uvicorn app:app --host 0.0.0.0 --port 8000
+DEMO_MODE=true python -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 # Terminal 2: Frontend
 cd octavia-web
@@ -82,24 +68,71 @@ npm run dev
 
 ### Docker Setup (Alternative)
 ```bash
-# Backend only
+# Backend only (with demo mode)
 cd backend
 docker build -t octavia-backend .
-docker run -p 8000:8000 octavia-backend
+docker run -e DEMO_MODE=true -p 8000:8000 octavia-backend
 
 # Or full stack with docker-compose
 docker-compose up
 ```
 
+### Demo Mode for Evaluation (No Supabase Required)
 
-### Docker Deployment (Alternative)
-```bash
-cd backend
-docker build -t octavia .
-# For mentor/demo evaluation, enable demo mode:
-docker run -e DEMO_MODE=true -p 8000:8000 octavia
+To enable test/demo mode (unlimited demo account, no database setup needed):
+
+- Set the environment variable `DEMO_MODE=true` when running the backend
+- Use the **Try Demo Account** button on the login page, or:
+  - **Email:** `demo@octavia.com`
+  - **Password:** `demo123`
+
+**Note:** In demo mode, all features work for the demo account, even if Supabase/database is unavailable. Real users still require Supabase keys.
+
+---
+
+## 📊 Current System Status
+
+### ✅ **Completed & Working Features**
+
+#### Backend Pipeline
+```
+Video Input → Audio Extraction → Chunking → STT → Translation → TTS → Sync → Merge → Video Output
+     ↓           ↓            ↓       ↓        ↓        ↓     ↓      ↓       ↓
+   FFmpeg     FFmpeg       AI      Whisper   Helsinki   Edge  pydub  FFmpeg  FFmpeg
+   (probe)    (extract)   Orchestrator (transcribe) (opus-mt) (TTS) (sync) (merge) (mux)
 ```
 
+#### Working Features
+- ✅ **Audio Quality Standards**: Working exceptionally well
+- ✅ **Subtitle Generation**: Fully functional
+- ✅ **Subtitle Translation**: Working correctly
+- ✅ **Demo Mode Authentication**: Complete login/logout system
+- ✅ **Job Persistence**: Supabase integration for job storage
+- ✅ **Real-time Progress Tracking**: Backend progress updates working
+
+### 🔄 **In Progress / Partially Working**
+
+#### Demo Mode Features
+- 🟡 **Demo Mode**: Works except video translation (backend processing issue)
+- 🟡 **Job History Fetching**: Backend returns data, frontend parsing needs fix
+- 🟡 **Payment Transactions**: Backend working, frontend integration in progress
+
+#### Audio Features
+- 🟡 **Audio Translation**: Functional but output quality needs improvement
+- 🟡 **Subtitle-to-Audio**: Working but audio output quality issues (both demo and real accounts)
+
+### 🔴 **Known Issues Requiring Fixes**
+
+#### Frontend Issues
+- 🔴 **Side-by-Side Video Player**: Still buggy/not working properly
+- 🔴 **Frontend Loading Updates**: Still buggy on frontend side
+- 🔴 **Job History Display**: Backend returns jobs but frontend shows demo data
+
+#### Audio Quality Issues
+- 🔴 **Audio Translation Output**: Audio quality poor in both demo and real accounts
+- 🔴 **Subtitle-to-Audio Output**: Audio quality issues persist
+
+---
 
 ## 🧪 Test Mode / Demo Mode (Mentor & Self-Evaluation)
 
@@ -107,8 +140,8 @@ To enable test/demo mode (no Supabase required, unlimited demo account):
 
 - Set the environment variable `DEMO_MODE=true` when running the backend.
   - For Docker: `docker run -e DEMO_MODE=true -p 8000:8000 octavia`
-  - For local:  
-    - Windows PowerShell: `$env:DEMO_MODE="true"; python app.py`  
+  - For local:
+    - Windows PowerShell: `$env:DEMO_MODE="true"; python app.py`
     - Linux/macOS: `DEMO_MODE=true python app.py`
 - Use the **Try Demo Account** button on the login page, or:
   - **Email:** `demo@octavia.com`
@@ -307,134 +340,50 @@ export NEXT_PUBLIC_API_URL=http://localhost:8000
 - **Success Rate**: 100% on test samples
 - **Resource Usage**: <4GB RAM, <1GB disk temp
 
-## 🐛 Known Limitations & Future Improvements
+## 🐛 Known Limitations & Current Issues
 
-### Current Limitations
-1. **AI Orchestrator**: Rule-based only (Llama.cpp integration planned)
-2. **Multi-speaker**: Single-speaker detection only
-3. **Voice Cloning**: Not implemented (uses pre-trained voices)
-4. **GPU Support**: CPU-only (CUDA integration planned)
-5. **Real-time Preview**: Batch processing only
-6. **Original Audio Access**: Currently unavailable after processing (backend limitation)
+### 🔴 Critical Issues (High Priority)
 
-### Recent Enhancements ✅
-1. **Side-by-Side Video Player**: Professional video comparison tool
-2. **A/B Audio Switching**: Synchronized audio track switching
-3. **Advanced UI**: Glass-morphism design with animations
-4. **Video Synchronization**: Frame-accurate playback sync
-5. **Responsive Design**: Mobile-friendly interface
+#### 1. **Video Translation in Demo Mode**
+- **Status**: 🔴 Broken - Demo mode video translation not working
+- **Impact**: High - Core feature unavailable in demo mode
+- **Affected**: Demo account video translation
+- **Root Cause**: Backend processing issue in demo mode
 
-### Planned Improvements
-1. **Enhanced AI Orchestrator**: Dynamic chunk sizing with LLM
-2. **Voice Cloning**: Coqui XTTS v2 integration
-3. **GPU Acceleration**: CUDA support for faster processing
-4. **Multi-speaker Support**: Speaker diarization
-5. **Cloud Scaling**: Distributed processing for long videos
-6. **Original Audio Preservation**: Backend changes to retain original audio tracks
+#### 2. **Audio Output Quality**
+- **Status**: 🔴 Poor quality across all audio features
+- **Impact**: High - Affects user experience
+- **Affected**: Audio translation, subtitle-to-audio (both demo and real accounts)
+- **Description**: Generated audio has quality issues
 
-## 🔴 Persistent Issues (Mentor Review)
+#### 3. **Side-by-Side Video Player**
+- **Status**: 🔴 Still buggy/not working properly
+- **Impact**: High - Major feature not functional
+- **Description**: Video player has synchronization and control issues
 
-### Critical Issues Requiring Attention
+#### 4. **Frontend Loading Updates**
+- **Status**: 🔴 Still buggy on frontend side
+- **Impact**: Medium - Affects user experience during processing
 
-#### 1. **Progress Bar During Translation** 🔴
-- **Status**: Persistently refusing to get fixed
-- **Impact**: High - affects user experience during translation
-- **Description**: The progress bar does not accurately reflect translation progress in real-time
-- **Affected Features**: Video translation, audio translation
-- **Developer Notes**: 
-  - Frontend polling mechanism works correctly
-  - Backend progress updates are being sent
-  - Issue appears to be in the progress calculation logic or state management
-  - Requires deep dive into the job status update flow
+#### 5. **Job History Frontend Display**
+- **Status**: 🔴 Backend returns data but frontend shows demo data
+- **Impact**: Medium - Users can't see real job history
+- **Root Cause**: Frontend response parsing issue (backend data: `response.data`, frontend expects: `response.data.jobs`)
 
-#### 2. **Subtitle Generation Download Feature** 🟡
-- **Status**: Works but download feature needs fixing
-- **Impact**: Medium - subtitle generation completes successfully
-- **Description**: Subtitle generation works correctly, but the download endpoint has issues
-- **Affected Features**: Subtitle generation
-- **Developer Notes**:
-  - Generation process completes successfully
-  - Files are created and stored correctly
-  - Download endpoint routing or file path resolution needs investigation
-  - May be related to job persistence in `subtitle_jobs` dictionary
+### 🟡 Medium Priority Issues
 
-#### 3. **Subtitle Translation Performance** 🟡
-- **Status**: Works but slower than expected
-- **Impact**: Medium - functional but not optimal
-- **Description**: Subtitle translation takes longer than anticipated
-- **Affected Features**: Subtitle translation
-- **Developer Notes**:
-  - Helsinki NLP model loading time may be the bottleneck
-  - Consider model caching or pre-loading
-  - Investigate async processing optimization
-  - Add performance profiling to identify exact bottleneck
+#### 6. **Job History Fetching**
+- **Status**: 🟡 Backend working, frontend integration in progress
+- **Impact**: Medium - Job history partially functional
 
-#### 4. **Developer Logging System** 🟡
-- **Status**: Needs enhancement
-- **Impact**: Low - affects debugging efficiency
-- **Description**: Current logging system needs more detailed output for debugging
-- **Recommendations**:
-  - Add structured logging with log levels (DEBUG, INFO, WARNING, ERROR)
-  - Implement request tracing with correlation IDs
-  - Add performance metrics logging
-  - Create separate log files for different modules
-  - Implement log rotation to prevent disk space issues
+#### 7. **Payment Transactions**
+- **Status**: 🟡 Backend working, frontend integration in progress
+- **Impact**: Medium - Transaction history not fully implemented
 
-#### 5. **Job History Limitations** 🟠
-- **Status**: Partially implemented
-- **Impact**: Medium - affects user experience and data persistence
-- **Description**: Job history system has several limitations
-- **Specific Issues**:
-  - **Translation Jobs**: Works but lacks detailed metadata
-    - Missing: file size, processing time, quality metrics
-    - Missing: error details and retry information
-  - **Subtitle Jobs**: Not implemented yet
-    - No history tracking for subtitle generation
-    - No history tracking for subtitle translation
-  - **Credits History**: Not implemented yet
-    - No transaction log for credit usage
-    - No refund tracking
-- **Developer Notes**:
-  - Consider implementing a unified job history table in Supabase
-  - Add job metadata schema with all relevant fields
-  - Implement pagination for large job lists
-  - Add filtering and search capabilities
+### ✅ Recently Resolved Issues
 
-#### 6. **Audio Translation Quality Assurance** 🟠
-- **Status**: Works but needs QA improvements
-- **Impact**: Medium - affects output quality
-- **Description**: Audio translation completes successfully but quality assurance is lacking
-- **Specific Issues**:
-  - No automated quality checks on generated audio
-  - No validation of audio duration matching
-  - No SNR (Signal-to-Noise Ratio) verification
-  - No lip-sync accuracy validation
-- **Developer Notes**:
-  - Implement automated quality checks:
-    - Audio duration validation (should match source ±100ms)
-    - SNR threshold validation (\u003e20dB recommended)
-    - Silence detection and removal
-    - Peak normalization verification
-  - Add quality metrics to job results
-  - Consider implementing a quality score system
-
-#### 7. **Subtitle-to-Audio Feature** 🟡
-- **Status**: Works but not as intended
-- **Impact**: Medium - functional but needs refinement
-- **Description**: Subtitle-to-audio conversion works but has quality and timing issues
-- **Specific Issues**:
-  - Timing synchronization could be more accurate
-  - Audio quality varies depending on TTS engine
-  - No voice selection options for users
-  - No prosody or emotion control
-- **Developer Notes**:
-  - Currently uses gTTS as primary, Edge-TTS as fallback
-  - Consider adding voice selection UI
-  - Implement better timing synchronization algorithm
-  - Add audio post-processing for consistent quality
-
-### ✅ Resolved: In-Memory Job Storage
-- **Status**: ✅ FIXED - Jobs now persist in Supabase (v1.1.5)
+#### **Job Persistence Migration**
+- **Status**: ✅ COMPLETED - Jobs now persist in Supabase (v1.1.5)
 - **Impact**: All jobs survive server restarts and deployments
 - **Solution**: Unified `job_storage` service with Supabase backend
 - **Implementation**:
@@ -442,22 +391,26 @@ export NEXT_PUBLIC_API_URL=http://localhost:8000
   - Added optimistic locking (version column) for concurrent updates
   - Comprehensive migration tool for existing JSON data
   - Full metrics and ETA tracking support
-- **Documentation**: See `PERSISTENT_JOB_STORAGE.md` for full migration guide
 
-### Testing Recommendations
-1. Add integration tests for all job types
-2. Implement end-to-end tests for complete workflows
-3. Add performance benchmarks for each feature
-4. Create automated quality validation tests
-5. Implement stress testing for concurrent jobs
-
-### Priority Order for Fixes
-1. 🔴 **High Priority**: Progress bar, in-memory job storage
-2. 🟠 **Medium Priority**: Job history implementation, audio QA
-3. 🟡 **Low Priority**: Subtitle download, performance optimization, logging enhancements
-
+---
 
 ## 📈 Recent Updates & Changelog
+
+### Version 1.1.6 - Current Status (January 2026)
+- 🟡 **Demo Mode**: Working except video translation
+- 🟡 **Audio Features**: Functional but quality issues remain
+- 🔴 **Frontend Issues**: Side-by-side player and loading updates still buggy
+- 🔴 **Job History**: Backend working, frontend parsing needs fix
+- ✅ **Job Persistence**: Full Supabase integration completed
+- ✅ **Audio Quality Standards**: Working exceptionally well
+
+### Version 1.1.5 - Persistent Job Storage ✅
+- ✅ **In-Memory Job Storage Migration**: Replaced all in-memory job stores with Supabase persistence
+- ✅ **Job Persistence**: Jobs survive server restarts and persist across deployments
+- ✅ **Unified Storage**: Single `translation_jobs` table supports all job types (video, audio, subtitles)
+- ✅ **Optimistic Locking**: Version-based concurrency control prevents update conflicts
+- ✅ **Job Metrics**: Full support for ETA, processing metrics, and quality scores
+- ✅ **Migration Tool**: Automated script to migrate existing JSON jobs to Supabase
 
 ### Version 1.1.0 - Advanced Video Player Features
 - ✅ **Side-by-Side Video Player**: Professional video comparison tool with synchronized playback
@@ -466,42 +419,14 @@ export NEXT_PUBLIC_API_URL=http://localhost:8000
 - ✅ **Video Synchronization**: Frame-accurate timing between multiple video streams
 - ✅ **Responsive Controls**: Mobile-optimized video controls
 
-### Version 1.0.5 - Persistent Job Storage ✅
-- ✅ **In-Memory Job Storage Migration**: Replaced all in-memory job stores with Supabase persistence
-- ✅ **Job Persistence**: Jobs survive server restarts and persist across deployments
-- ✅ **Unified Storage**: Single `translation_jobs` table supports all job types (video, audio, subtitles)
-- ✅ **Optimistic Locking**: Version-based concurrency control prevents update conflicts
-- ✅ **Job Metrics**: Full support for ETA, processing metrics, and quality scores
-- ✅ **Migration Tool**: Automated script to migrate existing JSON jobs to Supabase
-
-**Backend Changes:**
-- Removed: `jobs_db`, `subtitle_jobs` in-memory dictionaries
-- Removed: All JSON file I/O operations for job persistence
-- Added: `backend/services/job_storage.py` - Unified job storage service
-- Added: `backend/migrations/001_add_job_persistence.sql` - Database schema updates
-- Added: `backend/migrations/migrate_jobs_to_supabase.py` - Data migration script
-- Updated: `/api/jobs/{job_id}/status` - Queries Supabase instead of memory
-- Updated: `/api/jobs/history` - Returns jobs from Supabase database
-- Updated: All job creation endpoints - Use `job_storage.create_job()`
-
-**Database Schema Updates:**
-- New columns: `version`, `eta_seconds`, `metrics` (JSONB)
-- New columns: `processed_chunks`, `total_chunks`, `chunk_size`, `available_chunks` (JSONB)
-- New columns: `processing_time_seconds`, `source_lang`, `voice`, `output_format`, `segment_count`
-- New indexes: Optimized queries on status and user_id
-
-**Migration Results:**
-- 7 out of 10 existing jobs successfully migrated to Supabase
-- All in-memory state removed
-- JSON files backed up to `.backup` files
-- Zero-downtime migration completed
-
 ### Version 1.0.0 - Core Platform Release
 - ✅ **End-to-End Video Translation**: Complete pipeline from upload to delivery
 - ✅ **Multi-Service Integration**: OpenAI Whisper, Helsinki NLP, Coqui TTS
 - ✅ **Real-time Progress Tracking**: Live updates during processing
 - ✅ **Professional Dashboard**: Modern UI with authentication and billing
 - ✅ **Comprehensive Testing**: Full integration test suite
+
+---
 
 ## 🤝 Contributing
 
@@ -542,62 +467,15 @@ This project is part of the LunarTech AI Engineering Bootcamps technical assessm
 - **Audio Processing**: pydub, ffmpeg-python
 - **Web Framework**: FastAPI, Next.js
 
-## 🛠️ Technical Architecture
-
-### Frontend Architecture
-```
-octavia-web/
-├── app/                    # Next.js 16 App Router
-│   ├── dashboard/         # Protected dashboard routes
-│   ├── auth/              # Authentication pages
-│   └── api/               # API routes (future use)
-├── components/            # Reusable React components
-│   ├── dashboard/         # Dashboard-specific components
-│   │   └── SideBySideVideoPlayer.tsx # Advanced video player
-│   └── ui/                # Base UI components
-├── lib/                   # Utilities and services
-│   ├── api.ts            # Backend API client
-│   └── utils.ts          # Helper functions
-└── contexts/             # React contexts
-    └── UserContext.tsx   # User authentication state
-```
-
-### Side-by-Side Video Player Architecture
-```
-SideBySideVideoPlayer
-├── Video Synchronization Engine
-│   ├── Time update listeners
-│   ├── Seek synchronization
-│   └── Playback coordination
-├── A/B Audio Control System
-│   ├── Volume management
-│   ├── Track switching
-│   └── Mute handling
-├── UI Components
-│   ├── Video containers
-│   ├── Control buttons
-│   └── Progress indicators
-└── Responsive Layout System
-```
-
-## 📞 Support
-
-For technical questions or issues:
-- Check `backend/backend_debug.log` for errors
-- Review `artifacts/logs.jsonl` for processing details
-- Run `python cli.py metrics` for performance stats
-- View browser console for frontend debugging
-
 ---
 
 ## 📊 Project Status
 
-- **Current Version**: 1.1.5
+- **Current Version**: 1.1.6
 - **Last Updated**: January 2026
-- **Status**: ✅ Production Ready with Persistent Storage
-- **Demo**: Integrated demo mode available
+- **Status**: 🟡 Functional with known issues requiring fixes
+- **Demo**: Integrated demo mode available (partial functionality)
 - **Documentation**: Comprehensive technical docs included
-- **Latest Feature**: Supabase job persistence with optimistic locking
 
 ---
 
