@@ -39,6 +39,14 @@
 - **FFmpeg**: Latest version (automatically handled)
 - **Hardware**: 8GB RAM minimum, 16GB recommended
 
+### Environment Setup
+1. Copy the example environment files and configure with your API keys:
+   ```bash
+   cp .env.example .env
+   cp .env.local.example .env.local
+   ```
+   Edit `.env` with your backend secrets and `.env.local` with your frontend configuration.
+
 ### One-Command Setup & Run
 
 #### Backend Setup (Recommended for Evaluation)
@@ -316,14 +324,37 @@ logging:
 ```
 
 ### Environment Variables
-```bash
-# Backend
-export PYTHONPATH=/app
-export OMP_NUM_THREADS=4
 
-# Frontend
-export NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+1. **Copy the example environment files:**
+   ```bash
+   # For backend (root directory)
+   cp .env.example .env
+
+   # For frontend (root directory)
+   cp .env.local.example .env.local
+   ```
+
+2. **Configure the environment variables:**
+
+   - **Backend (.env)**: Update with your actual API keys, database credentials, and payment provider settings
+   - **Frontend (.env.local)**: Update with your Supabase public keys and API URL
+
+3. **Required Keys:**
+
+   - **Supabase**: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - **Payments (Polar.sh)**: `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_SERVER`
+   - **Email (SMTP)**: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+   - **Demo Mode**: `DEMO_MODE=true` to skip database setup for testing
+
+4. **Example configuration:**
+   ```bash
+   # Backend
+   export PYTHONPATH=/app
+   export OMP_NUM_THREADS=4
+
+   # Frontend
+   export NEXT_PUBLIC_API_URL=http://localhost:8000
+   ```
 
 ## 📈 Evaluation Metrics
 
