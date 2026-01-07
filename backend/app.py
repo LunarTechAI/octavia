@@ -1890,20 +1890,17 @@ async def review_subtitles(
 
 
 
-#  generate audio from subtitles
 async def generate_audio_from_subtitles(subtitle_content: str, language: str, voice: str, output_format: str = "mp3"):
-    """Generate audio from subtitle text using gTTS"""
+    """Generate high-quality audio from subtitles using the same AudioTranslator pipeline as video translation"""
     try:
-        logger.info(f"Starting audio generation for language: {language}, voice: {voice}, format: {output_format}")
-        logger.info(f"Subtitle content length: {len(subtitle_content)} characters")
-        # Parse SRT content
+        logger.info(f"Starting HIGH-QUALITY subtitle-to-audio generation for language: {language}, voice: {voice}")
+
+        # Parse SRT content into segments
         subtitles = []
         lines = subtitle_content.strip().split('\n')
 
-        logger.info(f"Parsing {len(lines)} lines of subtitle content")
-
         current_subtitle = {}
-        for i, line in enumerate(lines):
+        for line in lines:
             line = line.strip()
             if not line:
                 if current_subtitle and 'text' in current_subtitle:
@@ -1911,226 +1908,106 @@ async def generate_audio_from_subtitles(subtitle_content: str, language: str, vo
                     current_subtitle = {}
                 continue
 
-            try:
-                # Check if line is a number (subtitle index)
-                if line.isdigit() and 'start' not in current_subtitle:
-                    current_subtitle = {'index': int(line)}
-                    logger.debug(f"Found subtitle index: {line}")
+            # Parse SRT format
+            if line.isdigit() and 'index' not in current_subtitle:
+                current_subtitle = {'index': int(line)}
+            elif '-->' in line:
+                start_str, end_str = line.split('-->')
+                def parse_srt_time(ts):
+                    ts = ts.strip()
+                    if ',' in ts:
+                        time_part, ms = ts.split(',')
+                        h, m, s = time_part.split(':')
+                        return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+                    return 0
+                current_subtitle['start'] = parse_srt_time(start_str)
+                current_subtitle['end'] = parse_srt_time(end_str)
+                current_subtitle['duration'] = current_subtitle['end'] - current_subtitle['start']
+            elif 'start' in current_subtitle and 'text' not in current_subtitle:
+                current_subtitle['text'] = line
 
-                # Check if line contains timestamp
-                elif '-->' in line:
-                    start_end = line.split('-->')
-                    if len(start_end) == 2:
-                        start_str, end_str = start_end
-
-                        # Parse SRT timestamp to seconds
-                        def parse_srt_time(timestamp):
-                            timestamp = timestamp.strip()
-                            if ',' not in timestamp:
-                                # Handle formats without milliseconds
-                                parts = timestamp.split(':')
-                                if len(parts) == 3:
-                                    h, m, s = parts
-                                    return int(h) * 3600 + int(m) * 60 + float(s)
-                                return 0
-
-                            time_part, millis_part = timestamp.split(',')
-                            h, m, s = time_part.split(':')
-                            hours = int(h)
-                            minutes = int(m)
-                            seconds = int(s)
-                            milliseconds = int(millis_part)
-                            return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
-
-                        current_subtitle['start'] = parse_srt_time(start_str)
-                        current_subtitle['end'] = parse_srt_time(end_str)
-                        current_subtitle['duration'] = max(0.1, current_subtitle['end'] - current_subtitle['start'])  # Minimum 0.1s
-                        logger.debug(f"Parsed timestamp: {start_str} --> {end_str}")
-
-                # Text content (only if we have parsed start/end)
-                elif 'start' in current_subtitle and 'text' not in current_subtitle:
-                    current_subtitle['text'] = line
-                    logger.debug(f"Found text: '{line[:50]}...'")
-
-            except Exception as parse_error:
-                logger.warning(f"Error parsing line {i}: '{line}' - {parse_error}")
-                continue
-
-        # Add the last subtitle if it exists
+        # Add last subtitle
         if current_subtitle and 'text' in current_subtitle:
-            subtitles.append(current_subtitle.copy())
+            subtitles.append(current_subtitle)
 
-        logger.info(f"Successfully parsed {len(subtitles)} subtitle segments")
+        logger.info(f"Parsed {len(subtitles)} subtitle segments")
 
         if not subtitles:
-            raise Exception("No valid subtitle segments found. Please check the SRT file format.")
-        
-        # Generate audio for subtitles using parallel processing
-        import asyncio
-        import concurrent.futures
-        from functools import partial
+            raise Exception("No valid subtitle segments found")
 
-        async def generate_audio_parallel():
-            """Generate audio for all subtitles concurrently"""
-            audio_segments = []
+        # Use the SAME AudioTranslator as video translation for crystal-clear quality
+        from modules.audio_translator import AudioTranslator, TranslationConfig
 
-            # Prepare TTS tasks
-            tts_tasks = []
-            for i, subtitle in enumerate(subtitles):
-                text = subtitle.get('text', '').strip()
-                if not text:
-                    continue
+        # Configure with the same settings as video translation
+        config = TranslationConfig(
+            source_lang=language,
+            target_lang=language,  # No translation, just TTS
+            enable_input_normalization=True,
+            enable_denoising=True,
+            enable_gain_consistency=True,
+            enable_silence_padding=True,
+            validation_spots=3,  # Quality validation like video
+            target_lufs=-16.0  # Same loudness as video
+        )
 
-                # Validate and clean text
-                text = text.strip()
-                if len(text) > 500:
-                    text = text[:500] + "..."
+        translator = AudioTranslator(config)
+        translator.load_models()  # Load the same high-quality models as video
 
-                task = {
-                    'index': i,
-                    'text': text,
-                    'start_time': subtitle['start'] * 1000,
-                    'target_duration_ms': int(subtitle['duration'] * 1000)
-                }
-                tts_tasks.append(task)
+        # Combine all subtitle text (video translation processes entire content)
+        full_text = " ".join([sub.get('text', '').strip() for sub in subtitles if sub.get('text', '').strip()])
 
-            logger.info(f"Starting parallel TTS generation for {len(tts_tasks)} subtitles")
+        if not full_text:
+            raise Exception("No text content found in subtitles")
 
-            # Process TTS in parallel batches
-            batch_size = 5  # Process 5 TTS calls concurrently
-            semaphore = asyncio.Semaphore(batch_size)
+        logger.info(f"Combined subtitle text: {len(full_text)} characters")
 
-            async def process_single_tts(task):
-                async with semaphore:
-                    i = task['index']
-                    text = task['text']
-                    start_time = task['start_time']
-                    target_duration_ms = task['target_duration_ms']
+        # Create temporary output path
+        output_path = f"temp_subtitle_audio_{uuid.uuid4()}.wav"
 
-                    try:
-                        logger.debug(f"Processing TTS for subtitle {i+1}: '{text[:30]}...'")
+        # Generate speech using the SAME high-quality TTS pipeline as video translation
+        success, timing_segments = translator.synthesize_speech_with_timing(
+            full_text,
+            [],  # No existing segments for subtitle-to-audio
+            output_path
+        )
 
-                        # Use AudioTranslator's TTS methods
-                        from modules.audio_translator import AudioTranslator, TranslationConfig
-                        config = TranslationConfig(source_lang=language, target_lang=language)
-                        translator = AudioTranslator(config)
+        if not success or not os.path.exists(output_path):
+            raise Exception("High-quality TTS synthesis failed")
 
-                        temp_output_path = f"temp_tts_{i}_{uuid.uuid4()}.wav"
+        # Apply the SAME audio processing as video translation
+        if translator.config.enable_gain_consistency:
+            logger.info("Applying gain consistency (same as video translation)")
+            final_audio = AudioSegment.from_file(output_path)
+            processed_audio = translator.apply_gain_consistency(final_audio, translator.config.target_lufs)
+            processed_audio.export(output_path, format="wav")
 
-                        # Try TTS methods (will run in thread pool to avoid blocking)
-                        loop = asyncio.get_event_loop()
-                        try:
-                            # Try gTTS first (more reliable)
-                            success, _ = await loop.run_in_executor(
-                                None,
-                                partial(translator._fallback_gtts_synthesis, text, [], temp_output_path)
-                            )
+        logger.info(f"[SUCCESS] Generated crystal-clear subtitle audio: {output_path}")
 
-                            if not success or not os.path.exists(temp_output_path):
-                                logger.debug(f"gTTS failed for subtitle {i+1}, trying Edge TTS")
-                                # Fallback to Edge TTS
-                                success, _ = await loop.run_in_executor(
-                                    None,
-                                    partial(translator._edge_tts_synthesis, text, [], temp_output_path)
-                                )
-
-                            if not success or not os.path.exists(temp_output_path):
-                                raise Exception("All TTS methods failed")
-
-                            # Load audio (in thread pool)
-                            segment = await loop.run_in_executor(
-                                None, AudioSegment.from_file, temp_output_path, "wav"
-                            )
-
-                        finally:
-                            # Clean up temp file
-                            if os.path.exists(temp_output_path):
-                                try:
-                                    os.remove(temp_output_path)
-                                except:
-                                    pass
-
-                        # Adjust duration (in thread pool to avoid blocking)
-                        if len(segment) < target_duration_ms:
-                            silence = AudioSegment.silent(duration=target_duration_ms - len(segment))
-                            segment = segment + silence
-                        elif len(segment) > target_duration_ms:
-                            speed_factor = min(len(segment) / target_duration_ms, 1.5)
-                            segment = await loop.run_in_executor(
-                                None,
-                                lambda: segment.speedup(playback_speed=speed_factor, chunk_size=150, crossfade=25)
-                            )
-
-                        logger.debug(f"Completed TTS for subtitle {i+1}: {len(segment)}ms")
-                        return (start_time, segment)
-
-                    except Exception as e:
-                        logger.warning(f"TTS failed for subtitle {i+1}: {e}")
-                        # Return silent segment as fallback
-                        silence = AudioSegment.silent(duration=target_duration_ms)
-                        return (start_time, silence)
-
-            # Execute all TTS tasks concurrently
-            tasks = [process_single_tts(task) for task in tts_tasks]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process results
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"Task {i} failed with exception: {result}")
-                    # Add fallback silent segment
-                    task = tts_tasks[i]
-                    silence = AudioSegment.silent(duration=task['target_duration_ms'])
-                    audio_segments.append((task['start_time'], silence))
-                else:
-                    audio_segments.append(result)
-
-            # Sort by start time
-            audio_segments.sort(key=lambda x: x[0])
-
-            logger.info(f"Parallel TTS generation completed: {len(audio_segments)} segments")
-            return audio_segments
-
-        # Run parallel audio generation
-        audio_segments = await generate_audio_parallel()
-        
-        # Combine all audio segments
-        if not audio_segments:
-            raise Exception("No audio segments generated")
-        
-        # Find total duration
-        max_end_time = max([start + len(seg) for start, seg in audio_segments])
-        
-        # Create silent base track
-        combined = AudioSegment.silent(duration=max_end_time)
-        
-        # Overlay each segment at its correct timestamp
-        for start_ms, segment in audio_segments:
-            combined = combined.overlay(segment, position=int(start_ms))
-        
-        # Ensure outputs directory exists
+        # Convert to requested format and return
+        final_output_path = f"outputs/subtitle_audio_{uuid.uuid4()}.{output_format}"
         os.makedirs("outputs", exist_ok=True)
-        
-        # Export to requested format
-        output_filename = f"subtitle_audio_{uuid.uuid4()}.{output_format}"
-        output_path = os.path.join("outputs", output_filename)
-        
+
+        final_audio = AudioSegment.from_file(output_path)
+
         if output_format == "mp3":
-            combined.export(output_path, format="mp3", bitrate="192k")
+            final_audio.export(final_output_path, format="mp3", bitrate="192k")
         elif output_format == "wav":
-            combined.export(output_path, format="wav")
+            final_audio.export(final_output_path, format="wav")
         else:
-            combined.export(output_path, format="mp3", bitrate="192k")
-        
-        logger.info(f"[SUCCESS] Successfully generated audio file: {output_path} ({len(subtitles)} segments)")
+            final_audio.export(final_output_path, format="mp3", bitrate="192k")
+
+        # Cleanup temp file
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+        output_filename = os.path.basename(final_output_path)
+        logger.info(f"[SUCCESS] Subtitle-to-audio completed with video-quality audio: {output_filename}")
         return output_filename, len(subtitles)
-        
+
     except Exception as e:
-        logger.error(f" Audio generation failed: {e}")
-        logger.error(f"Subtitle content preview: {subtitle_content[:200]}...")
-        logger.error(f"Language: {language}, Voice: {voice}, Format: {output_format}")
+        logger.error(f"High-quality subtitle-to-audio failed: {e}")
         import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise
 
 # Add this endpoint to app.py (after subtitle translation endpoints)
@@ -2220,6 +2097,123 @@ async def generate_subtitle_audio(
         raise HTTPException(status_code=500, detail=f"Audio generation failed: {str(e)}")
 
 async def translate_subtitle_content(subtitle_content: str, source_language: str, target_language: str, file_path: str) -> tuple[str, str]:
+    """Translate subtitle content using the same AudioTranslator as video translation"""
+    translated_content = subtitle_content
+    language_to_use = source_language
+
+    if source_language != target_language:
+        logger.info(f"Translation needed from {source_language} to {target_language}")
+
+        # Use the same AudioTranslator as video translation for consistency
+        try:
+            from modules.audio_translator import AudioTranslator, TranslationConfig
+            config = TranslationConfig(source_lang=source_language, target_lang=target_language)
+            translator = AudioTranslator(config)
+
+            if file_path.lower().endswith('.srt'):
+                logger.info("Parsing SRT file for batch translation")
+                subs = pysrt.open(file_path)
+
+                # Extract texts for batch processing
+                subtitle_texts = []
+                subtitle_indices = []
+                for i, sub in enumerate(subs):
+                    text = sub.text.strip()
+                    if text:  # Only process non-empty subtitles
+                        subtitle_texts.append(text)
+                        subtitle_indices.append((i, sub))
+
+                logger.info(f"Found {len(subtitle_texts)} non-empty subtitles for translation")
+
+                # Batch translate using the same method as video translation
+                translated_texts = []
+                batch_size = 10  # Process 10 subtitles at a time
+
+                for batch_start in range(0, len(subtitle_texts), batch_size):
+                    batch_end = min(batch_start + batch_size, len(subtitle_texts))
+                    batch_texts = subtitle_texts[batch_start:batch_end]
+
+                    logger.info(f"Translating batch {batch_start//batch_size + 1}: subtitles {batch_start + 1}-{batch_end}")
+
+                    # Use the same translation method as video translation
+                    try:
+                        combined_text = " ||| ".join(batch_texts)
+                        translated_batch, _ = translator.translate_text_with_context(combined_text, [])
+                        batch_results = translated_batch.split(" ||| ")
+                        translated_texts.extend(batch_results[:len(batch_texts)])
+
+                    except Exception as batch_error:
+                        logger.warning(f"Batch translation failed: {batch_error}")
+                        # Fallback: translate individually
+                        for text in batch_texts:
+                            try:
+                                translated, _ = translator.translate_text_with_context(text, [])
+                                translated_texts.append(translated)
+                            except Exception as individual_error:
+                                logger.error(f"Individual translation failed: {individual_error}")
+                                translated_texts.append(f"[{target_language.upper()}] {text}")
+
+                # Reconstruct subtitles with translated text
+                translated_subs = []
+                text_idx = 0
+                for i, sub in subtitle_indices:
+                    if text_idx < len(translated_texts):
+                        translated_text = translated_texts[text_idx]
+                        translated_subs.append(pysrt.SubRipItem(
+                            index=sub.index,
+                            start=sub.start,
+                            end=sub.end,
+                            text=translated_text
+                        ))
+                        text_idx += 1
+
+                # Create translated SRT content
+                translated_content = ""
+                for sub in translated_subs:
+                    translated_content += f"{sub.index}\n"
+                    start_str = str(sub.start).replace('.', ',')
+                    end_str = str(sub.end).replace('.', ',')
+                    translated_content += f"{start_str} --> {end_str}\n"
+                    translated_content += f"{sub.text}\n\n"
+
+                logger.info(f"Translation completed. Translated content length: {len(translated_content)}")
+                language_to_use = target_language
+            else:
+                logger.info(f"File {file_path} is not SRT format, skipping structured translation")
+        except Exception as translator_error:
+            logger.warning(f"AudioTranslator failed, falling back to basic translation: {translator_error}")
+            # Fallback to basic translation if AudioTranslator fails
+            try:
+                from deep_translator import GoogleTranslator
+                translator = GoogleTranslator(source=source_language, target=target_language)
+
+                if file_path.lower().endswith('.srt'):
+                    subs = pysrt.open(file_path)
+                    translated_subs = []
+                    for sub in subs:
+                        if sub.text and sub.text.strip():
+                            translated_text = translator.translate(sub.text)
+                            sub.text = translated_text
+                        translated_subs.append(sub)
+
+                    # Create translated SRT content
+                    translated_content = ""
+                    for sub in translated_subs:
+                        translated_content += f"{sub.index}\n"
+                        start_str = str(sub.start).replace('.', ',')
+                        end_str = str(sub.end).replace('.', ',')
+                        translated_content += f"{start_str} --> {end_str}\n"
+                        translated_content += f"{sub.text}\n\n"
+
+                    language_to_use = target_language
+                else:
+                    logger.info(f"File {file_path} is not SRT format, skipping structured translation")
+            except Exception as fallback_error:
+                logger.warning(f"Fallback translation also failed: {fallback_error}")
+    else:
+        logger.info(f"No translation needed - source and target languages are the same ({source_language})")
+
+    return translated_content, language_to_use
     """Translate subtitle content if needed, return translated content and language to use"""
     translated_content = subtitle_content
     language_to_use = source_language
@@ -2528,22 +2522,98 @@ async def download_subtitle_audio(
 
 # Audio translation background processing
 async def process_audio_translation_job(job_id: str, file_path: str, source_lang: str, target_lang: str, user_id: str):
-    """Background task for audio translation"""
+    """Background task for audio translation using SAME high-quality pipeline as video translation"""
     try:
         # Update job status
-        jobs_db[job_id]["progress"] = 10
-        jobs_db[job_id]["status"] = "processing"
+        jobs_db[job_id]["progress"] = 5
+        jobs_db[job_id]["message"] = "Loading AI models..."
 
-        # Initialize translator with config
+        # Use the SAME high-quality AudioTranslator as video translation
         from modules.audio_translator import AudioTranslator, TranslationConfig
-        config = TranslationConfig(source_lang=source_lang, target_lang=target_lang)
+
+        # Configure with the same settings as video translation for crystal-clear quality
+        config = TranslationConfig(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            enable_input_normalization=True,
+            enable_denoising=True,
+            enable_gain_consistency=True,
+            enable_silence_padding=True,
+            validation_spots=3,  # Quality validation like video
+            target_lufs=-16.0,  # Same loudness as video
+            chunk_size=30,  # Same chunking as video
+            timing_tolerance_ms=200,  # Same tolerance as video
+            voice_speed=1.0,
+            voice_pitch="+0Hz",
+            voice_style="neutral"
+        )
+
         translator = AudioTranslator(config)
 
-        # Update progress
-        jobs_db[job_id]["progress"] = 25
+        # Load models (same as video translation)
+        if not translator.load_models():
+            raise Exception("Failed to load AI models for high-quality audio translation")
 
-        # Process audio
-        result = translator.process_audio(file_path)
+        jobs_db[job_id]["progress"] = 10
+        jobs_db[job_id]["message"] = "AI models loaded. Starting audio processing..."
+
+        # Step 1: Preprocess audio (same as video translation)
+        processed_audio_path = translator.preprocess_audio(file_path)
+        jobs_db[job_id]["progress"] = 20
+        jobs_db[job_id]["message"] = "Audio preprocessing completed..."
+
+        # Step 2: Transcribe with segments (same as video translation)
+        transcription = translator.transcribe_with_segments(processed_audio_path)
+        if not transcription.get("success", False):
+            error_msg = transcription.get("error", "Transcription failed")
+            raise Exception(f"Audio transcription failed: {error_msg}")
+
+        original_text = transcription["text"]
+        segments = transcription["segments"]
+        quality_metrics = transcription.get("quality_metrics", {})
+
+        jobs_db[job_id]["progress"] = 40
+        jobs_db[job_id]["message"] = f"Transcribed {len(original_text)} chars, {len(segments)} segments..."
+
+        # Step 3: Translate text (same as video translation)
+        translated_text, translated_segments = translator.translate_text_with_context(
+            original_text, segments
+        )
+
+        jobs_db[job_id]["progress"] = 60
+        jobs_db[job_id]["message"] = "Translation completed. Generating high-quality audio..."
+
+        # Step 4: Generate speech using SAME TTS pipeline as video translation
+        output_path = f"translated_audio_{job_id}.wav"
+        success, timing_segments = translator.synthesize_speech_with_timing(
+            translated_text, translated_segments, output_path
+        )
+
+        if not success or not os.path.exists(output_path):
+            raise Exception("High-quality TTS synthesis failed")
+
+        jobs_db[job_id]["progress"] = 80
+        jobs_db[job_id]["message"] = "TTS synthesis completed. Applying audio enhancement..."
+
+        # Step 5: Apply SAME audio processing as video translation
+        if translator.config.enable_gain_consistency:
+            final_audio = AudioSegment.from_file(output_path)
+            processed_audio = translator.apply_gain_consistency(final_audio, translator.config.target_lufs)
+            processed_audio.export(output_path, format="wav")
+
+        # Step 6: Quality validation (same as video translation)
+        if translator.config.validation_spots > 0:
+            validation_results = translator.validate_audio_quality(output_path, processed_audio_path)
+            if validation_results["quality_score"] < 0.7:
+                logger.warning(f"Audio quality validation warning: {validation_results['quality_score']:.2f}")
+
+        jobs_db[job_id]["progress"] = 95
+        jobs_db[job_id]["message"] = "Finalizing high-quality audio..."
+
+        # Step 7: Calculate final metrics
+        original_audio = AudioSegment.from_file(processed_audio_path)
+        translated_audio = AudioSegment.from_file(output_path)
+        duration_match_percent = (1 - abs(len(translated_audio) - len(original_audio)) / len(original_audio)) * 100
 
         # Update job with results
         jobs_db[job_id].update({
@@ -2551,13 +2621,16 @@ async def process_audio_translation_job(job_id: str, file_path: str, source_lang
             "progress": 100,
             "result": {
                 "download_url": f"/api/download/audio/{job_id}",
-                "duration_match_percent": result.duration_match_percent,
-                "speed_adjustment": result.speed_adjustment
+                "duration_match_percent": duration_match_percent,
+                "speed_adjustment": 1.0,
+                "quality_metrics": quality_metrics
             },
             "completed_at": datetime.utcnow().isoformat(),
-            "output_path": result.output_path  # Use the actual output path from translator
+            "output_path": output_path
         })
         save_jobs_db()
+
+        logger.info(f"[SUCCESS] High-quality audio translation completed: {output_path}")
 
         # Cleanup temp file
         if os.path.exists(file_path):
@@ -2964,3 +3037,4 @@ if __name__ == "__main__":
         port=8000,
         reload=False
     )
+        # Feature Flags & Capabilities

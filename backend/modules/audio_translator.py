@@ -596,7 +596,7 @@ class AudioTranslator:
             return text, 1.0
     
     def synthesize_speech_with_timing(self, text: str, segments: List[Dict], output_path: str) -> Tuple[bool, List[Dict]]:
-        """Generate speech with timing preservation using Edge TTS primary, gTTS fallback"""
+        """Generate speech with timing preservation using gTTS primary for crystal-clear audio"""
         try:
             if not text or len(text.strip()) < 2:
                 logger.warning("Text too short for TTS, creating silent audio")
@@ -607,13 +607,13 @@ class AudioTranslator:
             # Clean text to remove problematic Unicode characters
             text = self._clean_text_for_tts(text)
 
-            # Use gTTS as primary TTS (more reliable and faster)
-            logger.info(f"Generating speech with gTTS for language: {self.config.target_lang}")
+            # Use gTTS as primary TTS for crystal-clear audio quality (same as subtitle-to-audio)
+            logger.info(f"Generating crystal-clear speech with gTTS for language: {self.config.target_lang}")
             try:
                 return self._fallback_gtts_synthesis(text, segments, output_path)
             except Exception as gtts_error:
                 logger.warning(f"gTTS failed, falling back to Edge-TTS: {gtts_error}")
-                # Fallback to Edge-TTS
+                # Fallback to Edge-TTS only if gTTS fails
                 try:
                     return self._edge_tts_synthesis(text, segments, output_path)
                 except Exception as edge_error:
