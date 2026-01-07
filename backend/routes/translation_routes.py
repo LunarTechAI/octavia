@@ -684,6 +684,19 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
         if not result["success"]:
             raise ValueError(f"Subtitle generation failed: {result.get('error', 'Unknown error')}")
 
+        # Save the generated subtitles to outputs directory
+        os.makedirs("outputs", exist_ok=True)
+        output_path = os.path.join("outputs", f"subtitles_{job_id}.{format}")
+        with open(output_path, "w", encoding="utf-8") as f:
+            if format == "srt" and "output_files" in result and "srt" in result["output_files"]:
+                # Read from generated file
+                with open(result["output_files"]["srt"], "r", encoding="utf-8") as src:
+                    f.write(src.read())
+            else:
+                # Generate content directly
+                content = generator.format_to_srt(result["segments"])
+                f.write(content)
+
         # Update job with results
         update_data = {
             "status": "completed",
@@ -695,24 +708,13 @@ async def _process_subtitle_job_internal(job_id, file_path, language, format, us
                 "language": result["language"]
             },
             "completed_at": datetime.utcnow().isoformat(),
-            "output_path": f"subtitles_{job_id}.srt" if format == "srt" else f"subtitles_{job_id}.{format}"
+            "output_path": output_path,  # Use full path to outputs directory
+            "filename": f"subtitles_{job_id}.{format}"  # Also store filename for review endpoint
         }
         translation_jobs[job_id].update(update_data)
         # Also update in Supabase for review endpoint
         await job_storage.complete_job(job_id, update_data)
         save_translation_jobs()
-
-        # Save the generated subtitles
-        output_path = f"subtitles_{job_id}.{format}"
-        with open(output_path, "w", encoding="utf-8") as f:
-            if format == "srt" and "output_files" in result and "srt" in result["output_files"]:
-                # Read from generated file
-                with open(result["output_files"]["srt"], "r", encoding="utf-8") as src:
-                    f.write(src.read())
-            else:
-                # Generate content directly
-                content = generator.format_to_srt(result["segments"])
-                f.write(content)
 
         # Cleanup temp file
         if os.path.exists(file_path):
