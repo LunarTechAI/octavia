@@ -8,7 +8,16 @@ services:
       - ./backend/test_samples:/app/test_samples
       - ./backend/outputs:/app/outputs
     healthcheck:
-      test: ["CMD", "python", "-c", "print('healthcheck ok')"]
+      test: [ "CMD", "python", "-c", "print('healthcheck ok')" ]
       interval: 10s
       timeout: 5s
       retries: 3
+
+  frontend:
+    build: ./octavia-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - octavia

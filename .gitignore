@@ -235,7 +235,7 @@ ehthumbs.db
 Thumbs.db
 
 # Docker
-.dockerignore
+
 
 # Model files and checkpoints
 *.model

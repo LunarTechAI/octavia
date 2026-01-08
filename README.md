@@ -112,14 +112,20 @@ npm run dev
 ```
 
 ### Docker Setup
+
+#### Full Stack (Recommended)
+This will start both the Backend (API) and Frontend (Web UI).
 ```bash
-# Backend only
+docker-compose up --build
+```
+- **Frontend**: http://localhost:3000
+- **Backend**: http://localhost:8000
+
+#### Backend Only
+```bash
 cd backend
 docker build -t octavia-backend .
 docker run -e DEMO_MODE=true -p 8000:8000 octavia-backend
-
-# Or full stack with docker-compose
-docker-compose up
 ```
 
 ---
