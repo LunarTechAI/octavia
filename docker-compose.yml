@@ -1,23 +1,86 @@
 version: '3.8'
+
 services:
   octavia:
     build: ./backend
+    container_name: octavia-backend
     ports:
       - "8000:8000"
     volumes:
       - ./backend/test_samples:/app/test_samples
       - ./backend/outputs:/app/outputs
+      - ./backend/logs:/app/logs
+    environment:
+      # Core Settings
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # Supabase Configuration
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
+      
+      # Database (Postgres via Supabase)
+      - DATABASE_URL=${DATABASE_URL:-}
+      
+      # External APIs
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      
+      # Redis (optional, for caching)
+      - REDIS_URL=${REDIS_URL:-}
+      
+      # Frontend URL (for CORS)
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+    env_file:
+      - .env
     healthcheck:
-      test: [ "CMD", "python", "-c", "print('healthcheck ok')" ]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   frontend:
     build: ./octavia-web
+    container_name: octavia-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      - NODE_ENV=${NODE_ENV:-development}
+    env_file:
+      - .env
     depends_on:
-      - octavia
+      - octavia:
+          condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+# Named volumes for data persistence
+volumes:
+  backend_logs:
+  backend_outputs:
+  node_modules:
+
+networks:
+  default:
+    name: octavia-network

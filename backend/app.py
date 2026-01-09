@@ -1460,8 +1460,14 @@ async def download_generic(job_id: str, current_user: User = Depends(get_current
 
 # ========== HEALTH & TESTING ENDPOINTS ==========
 
-@app.get("/api/health")
+@app.get("/health")
 async def health_check():
+    """Lightweight health check endpoint for Docker healthchecks."""
+    return {"status": "healthy"}
+
+
+@app.get("/api/health")
+async def api_health_check():
     # Check whisper model status safely
     whisper_status = "not_available"
     try:
