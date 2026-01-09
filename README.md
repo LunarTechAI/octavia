@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-3110/)
-[![Next.js](https://img.shields.io/badge/Next.js-14.0-black)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16.0.3-black)](https://nextjs.org/)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 **Beyond Nations — Rise Beyond Language**
@@ -375,7 +375,204 @@ logging:
 - **History & Payments**: Full user dashboard functionality.
 
 #### 🚧 Known Issues
-- **Frontend Progress Tracker**: UI updates can be inconsistent. *Contributing Fixes Welcome!*
+
+**High Priority:**
+- ✅ **Dependency Conflicts**: FIXED - Changed `torch==2.1.2+cu121` to `torch==2.1.2` (CPU-only), pinned `numpy==1.26.4` for compatibility
+- **Port Conflicts**: Multiple uvicorn instances fighting for port 8000 cause uploads to hang and API timeouts. Implement PID check/lock file before starting.
+- ✅ **Log File Growth**: FIXED - Added `RotatingFileHandler` with 10MB max file size and 5 backup files in `app.py`
+- **CPU-Only Processing**: Using CPU-only torch slows translation. For GPU support, run: `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
+- **Progress Tracker Issues**: Frontend progress updates are inconsistent due to multiple storage backends and port conflicts. See [Progress Tracker Fix Hints](#-progress-tracker-fix-hints).
+
+**Medium Priority:**
+- **Docker Configuration**: Missing environment variables (DEMO_MODE, SUPABASE_*), no frontend healthcheck, no log persistence. Add `.env` file support and proper healthchecks.
+- ✅ **Frontend/Backend Version Mismatch**: FIXED - Updated README badge from Next.js 14.0 to 16.0.3 to match `package.json`
+- **Hardcoded Paths**: File paths like `backend/temp_video_*` break in Docker. Use configurable base paths via environment variables.
+- **Temp File Accumulation**: Files like `temp_video_*`, `temp_audio_*` accumulate and aren't cleaned up after successful jobs. Implement automatic cleanup.
+
+**Lower Priority:**
+- **Missing Error Handling**: Supabase operations lack retry logic for network failures. Add exponential backoff and circuit breaker pattern.
+- **Inconsistent API Responses**: Different endpoints return different response structures. Standardize all API responses.
+- **No Rate Limiting**: All endpoints lack rate limiting. Implement per-user/IP rate limiting.
+- **Missing Tests**: No visible test files despite README mentioning pytest. Add comprehensive test suite.
+
+*Contributing Fixes Welcome!*
+
+---
+
+## 🔧 Progress Tracker Fix Hints
+
+The frontend progress tracker (UI updates) can be inconsistent due to several interconnected issues. Here are hints to fix them:
+
+### Root Causes
+
+1. **Dual Storage Architecture (BY DESIGN)**: Demo accounts use in-memory `jobs_db = {}` while real accounts use Supabase `job_storage`. This is intentional for offline demo functionality.
+2. **Port Conflicts**: Multiple uvicorn instances mean progress polls may hit different server processes with different memory state
+3. **Race Conditions**: Progress updates may not complete before poll returns
+4. **Missing Cache Headers**: Browser may cache progress responses
+
+### Fix Hints
+
+**Hint 1: Query Both Storage Backends (Required for Dual Storage)**
+```python
+async def get_job_progress_unified(job_id: str, user_id: str):
+    """Query BOTH storage backends - one for demo, one for production"""
+    
+    # Try Supabase first (production users)
+    try:
+        job = await job_storage.get_job(job_id)
+        if job and job.get("user_id") == user_id:
+            return job
+    except Exception:
+        pass
+    
+    # Fallback to in-memory (demo users, or if Supabase fails)
+    if job_id in jobs_db and jobs_db[job_id].get("user_id") == user_id:
+        return jobs_db[job_id]
+    
+    return None
+```
+
+**Hint 2: Add PID Lock to Prevent Port Conflicts**
+```python
+import os
+PID_FILE = "uvicorn.pid"
+
+def check_pid_lock():
+    if os.path.exists(PID_FILE):
+        with open(PID_FILE, 'r') as f:
+            old_pid = int(f.read())
+            try:
+                os.kill(old_pid, 0)
+                print(f"Process {old_pid} already running")
+                exit(1)
+            except OSError:
+                pass
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+check_pid_lock()
+```
+
+**Hint 3: Add Cache-Control Headers**
+```python
+@app.get("/api/progress/{job_id}")
+async def get_job_progress(job_id: str, current_user = Depends(get_current_user)):
+    # Query both storage backends
+    job = await get_job_progress_unified(job_id, current_user.id)
+    
+    if not job:
+        raise HTTPException(404, "Job not found")
+    
+    return Response(
+        content=json.dumps({
+            "progress": job.get("progress", 0),
+            "status": job.get("status", "unknown"),
+            "message": job.get("message", "")
+        }),
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
+```
+
+**Hint 4: Use Server-Sent Events (Recommended for Real-Time)**
+```python
+# For real-time progress without polling
+from sse_starlette.sse import EventSourceResponse
+
+@app.get("/api/progress/stream/{job_id}")
+async def progress_stream(request: Request, job_id: str, current_user = Depends(get_current_user)):
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            
+            # Query both storage backends
+            job = await get_job_progress_unified(job_id, current_user.id)
+            
+            if job:
+                yield {
+                    "event": "progress",
+                    "data": json.dumps({
+                        "progress": job.get("progress", 0),
+                        "status": job.get("status", "unknown"),
+                        "message": job.get("message", "")
+                    })
+                }
+            
+            if not job or job.get("status") in ["completed", "failed"]:
+                break
+            
+            await asyncio.sleep(1)
+    
+    return EventSourceResponse(event_generator())
+```
+
+**Hint 5: Always Write to Both Storage Backends**
+```python
+async def update_job_progress(job_id: str, progress: int, message: str):
+    """Update BOTH storage backends for consistent reads"""
+    
+    # Update in-memory (demo mode)
+    if job_id in jobs_db:
+        jobs_db[job_id].update({
+            "progress": progress,
+            "message": message,
+            "status": "processing"
+        })
+    
+    # Update Supabase (production mode)
+    try:
+        await job_storage.update_progress(job_id, progress, message)
+    except Exception:
+        pass  # Demo mode or Supabase unavailable
+```
+
+**Hint 6: Debug Progress Issues**
+```bash
+# Check if job exists in storage
+curl http://localhost:8000/api/jobs/{job_id}/status
+
+# Check progress endpoint directly
+curl http://localhost:8000/api/progress/{job_id}
+
+# Verify logs
+grep "update_progress" artifacts/backend_debug.log
+```
+
+### Dual Storage Architecture Explained
+
+This is **intentional design** for the project:
+
+| User Type | Storage Backend | Reason |
+|-----------|----------------|--------|
+| Demo User (`demo@octavia.com`) | In-memory `jobs_db` | Works offline, no Supabase needed |
+| Production User | Supabase `job_storage` | Persistent across restarts |
+
+**Why the inconsistency occurs:**
+- Background jobs write to `jobs_db` (fast, in-memory)
+- Progress polls may query `job_storage` (Supabase) first
+- If Supabase write hasn't propagated, poll returns stale data
+
+**The fix:** Always write to BOTH backends, query BOTH backends with fallback.
+
+### Quick Test
+
+Before implementing fixes, verify the issue:
+```bash
+# Kill any existing servers
+pkill -f uvicorn || true
+
+# Start fresh single instance
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# Test progress tracking
+# 1. Start a translation job (demo mode)
+# 2. Poll /api/progress/{job_id} every 2 seconds
+# 3. Check if progress increments consistently
+# 4. Check artifacts/backend_debug.log for "update_progress" entries
+```
 
 ---
 

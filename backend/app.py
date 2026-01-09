@@ -36,9 +36,38 @@ from config import DEMO_MODE
 from services.job_service import job_service
 from services.translation_service import translation_service
 from routes.auth_routes import router as auth_router
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with rotation
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+
+# Ensure logs directory exists
+os.makedirs("artifacts", exist_ok=True)
+
+# Create rotating log handler (10MB max, keep 5 backup files)
+log_handler = RotatingFileHandler(
+    "artifacts/backend_debug.log",
+    maxBytes=10 * 1024 * 1024,  # 10MB per file
+    backupCount=5,              # Keep 5 rotated files
+    encoding="utf-8"
+)
+
+# Configure format
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+log_handler.setFormatter(formatter)
+
+# Set up logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
+
+# Also add console handler for debugging
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 # Constants
 DEFAULT_CHUNK_SIZE = 30

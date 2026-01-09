@@ -1,20 +1,29 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.16
-# Core AI - Pinned for CUDA 12.1 speed
-torch==2.1.2+cu121
-torchaudio==2.1.2+cu121
+
+# Core AI - CPU-only for maximum compatibility
+# For GPU support, install separately: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2
+torchaudio==2.1.2
+
 # Transcription & Translation
 openai-whisper==20250625
 faster-whisper
 transformers==4.48.3
 sentencepiece
 deep-translator==1.11.4
+
 # Audio Processing
 ffmpeg-python
 pydub
 edge-tts
 gtts
+
 # Subtitles
 webvtt-py
 pysrt==1.1.2
+
+# Utilities
+numpy==1.26.4  # Pinned for compatibility with transformers
+scikit-learn>=1.2.0
