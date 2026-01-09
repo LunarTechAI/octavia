@@ -197,8 +197,70 @@ class SimpleAppConfig:
 
 app_config = SimpleAppConfig()
 
-# Initialize FastAPI app
-app = FastAPI(title="Octavia Video Translator API", version="4.0.0")
+# Initialize cleanup utilities
+from services.cleanup_utils import run_full_cleanup, cleanup_temp_files
+
+def cleanup_on_startup():
+    """Run cleanup when server starts."""
+    logger.info("Running startup cleanup...")
+    try:
+        result = run_full_cleanup()
+        logger.info(
+            f"Startup cleanup: {result['total_cleaned']} files cleaned, "
+            f"{result['total_freed_bytes'] / 1024:.1f} KB freed"
+        )
+    except Exception as e:
+        logger.error(f"Startup cleanup failed: {e}")
+
+def cleanup_on_shutdown():
+    """Run cleanup when server shuts down."""
+    logger.info("Running shutdown cleanup...")
+    try:
+        result = run_full_cleanup()
+        logger.info(
+            f"Shutdown cleanup: {result['total_cleaned']} files cleaned, "
+            f"{result['total_freed_bytes'] / 1024:.1f} KB freed"
+        )
+    except Exception as e:
+        logger.error(f"Shutdown cleanup failed: {e}")
+
+def cleanup_job_temp_files(file_path: str, job_id: str):
+    """
+    Clean up temporary files after job completion or failure.
+    
+    Args:
+        file_path: Path to the temp file to clean
+        job_id: Job ID for logging
+    """
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            logger.info(f"Cleaned up temp file for job {job_id}: {file_path}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up temp file {file_path}: {e}")
+
+# Register startup and shutdown handlers
+import atexit
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown events."""
+    # Startup
+    cleanup_on_startup()
+    yield
+    # Shutdown
+    cleanup_on_shutdown()
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(
+    title="Octavia Video Translator API",
+    version="4.0.0",
+    lifespan=lifespan
+)
+
+# Register shutdown with atexit as backup
+atexit.register(cleanup_on_shutdown)
 
 # Add CORS middleware
 app.add_middleware(
@@ -213,7 +275,6 @@ app.add_middleware(
 app.include_router(auth_router)
 from routes.translation_routes import router as translation_router
 from routes.payment_routes import router as payment_router
-# Note: translation_router already has prefix="/api/translate" defined, so don't add it again
 app.include_router(translation_router)
 app.include_router(payment_router)
 
@@ -1705,6 +1766,23 @@ async def test_integration():
             "message": "Integration test failed"
         }
 
+@app.post("/api/admin/cleanup")
+async def manual_cleanup():
+    """Manually trigger cleanup of temporary files"""
+    try:
+        result = run_full_cleanup()
+        return {
+            "success": True,
+            "message": f"Cleanup completed: {result['total_cleaned']} files cleaned",
+            "files_cleaned": result["total_cleaned"],
+            "space_freed_bytes": result["total_freed_bytes"],
+            "space_freed_formatted": format_bytes(result["total_freed_bytes"]),
+            "failed": result["total_failed"]
+        }
+    except Exception as e:
+        logger.error(f"Manual cleanup failed: {e}")
+        raise HTTPException(500, f"Cleanup failed: {str(e)}")
+
 @app.get("/api/metrics")
 async def get_metrics():
     """Get processing metrics from logs"""
@@ -3068,4 +3146,3 @@ if __name__ == "__main__":
         port=8000,
         reload=False
     )
-        # Feature Flags & Capabilities

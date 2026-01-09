@@ -319,6 +319,38 @@ cache/
 *.vtt.tmp
 subtitles_cache/
 
+# Translated subtitle files (format: translated_YYYYMMDD_HHMMSS.srt)
+translated_[0-9]*.srt
+translated_[0-9]*.vtt
+translated_[0-9]*.ass
+translated_[0-9]*.ssa
+
+# Translated audio files (UUID format: translated_audio_UUID.wav/mp3)
+translated_audio_*.wav
+translated_audio_*.mp3
+translated_audio_*.flac
+translated_audio_*.ogg
+
+# Temporary subtitle files (UUID format: temp_UUID.srt)
+temp_*.srt
+temp_*.vtt
+temp_*.ass
+temp_*.ssa
+
+# Temporary audio files (UUID format: temp_UUID.mp3/wav/etc)
+temp_*.mp3
+temp_*.wav
+temp_*.flac
+temp_*.ogg
+temp_*.m4a
+temp_*.aac
+
+# Generic subtitle files
+subtitles.srt
+subtitles.vtt
+subtitles.ass
+subtitles.ssa
+
 # Backend specific
 backend/logs/
 backend/temp/
