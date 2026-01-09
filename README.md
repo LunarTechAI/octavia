@@ -165,19 +165,54 @@ To test the application without setting up a full database (Supabase), you can u
 ## 🎮 Usage Examples
 
 ### CLI Commands
+
+The Octavia CLI provides powerful command-line tools for testing, development, and production use. It's particularly useful for contributors who want to test the system with their own video files.
+
+#### Integration Testing
+Test the complete video translation pipeline with various input methods:
+
 ```bash
-# Test with 30s sample video
+# Interactive mode (prompts for video input)
 python cli.py test-integration
 
-# Translate video file
+# Test with local video file
+python cli.py test-integration --input /path/to/your/video.mp4 --target-lang es
+
+# Test with video from URL
+python cli.py test-integration --input https://example.com/sample.mp4 --target-lang fr
+
+# Test with different target language
+python cli.py test-integration --input video.mp4 --target-lang de
+```
+
+**Test Input Options:**
+- **Local files**: Any MP4/AVI/MOV video file on your system
+- **URLs**: Direct download from HTTP/HTTPS URLs
+- **Interactive prompts**: Step-by-step guidance when no arguments provided
+- **Default detection**: Automatically offers the included test video if available
+
+#### Other CLI Commands
+```bash
+# Translate video file directly
 python cli.py video --input sample.mp4 --target es
 
 # Generate subtitles only
 python cli.py subtitles --input video.mp4 --format srt
 
-# Show processing metrics
+# Translate audio file
+python cli.py audio --input audio.wav --source-lang en --target-lang es
+
+# Show processing metrics and logs
 python cli.py metrics
 ```
+
+#### CLI for Contributors
+The CLI is designed to be contributor-friendly:
+- **Flexible input**: Test with your own videos, URLs, or use provided samples
+- **No setup required**: Works with existing backend dependencies
+- **Comprehensive testing**: Validates all pipeline components
+- **Clear reporting**: Detailed test results and performance metrics
+- **Professional output**: Clean, technical formatting without distractions
 
 ### API Endpoints
 ```bash
