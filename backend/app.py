@@ -2138,8 +2138,11 @@ async def generate_subtitle_audio(
 ):
     """Generate audio from subtitle file with translation"""
     try:
+        # Check if demo user
+        is_demo_user = DEMO_MODE and current_user.email == "demo@octavia.com"
+        
         # Check if user has enough credits (5 credits for subtitle-to-audio)
-        if current_user.credits < 5:
+        if not is_demo_user and current_user.credits < 5:
             raise HTTPException(400, "Insufficient credits. You need at least 5 credits.")
         
         # Validate file
@@ -2160,8 +2163,9 @@ async def generate_subtitle_audio(
             content = await file.read()
             f.write(content)
         
-        # Deduct credits
-        supabase.table("users").update({"credits": current_user.credits - 5}).eq("id", current_user.id).execute()
+        # Deduct credits (skip for demo users)
+        if not is_demo_user:
+            supabase.table("users").update({"credits": current_user.credits - 5}).eq("id", current_user.id).execute()
         
         # Create job entry
         job_id = str(uuid.uuid4())
@@ -2201,7 +2205,7 @@ async def generate_subtitle_audio(
             "job_id": job_id,
             "message": "Audio generation started in background",
             "status_url": f"/api/generate/subtitle-audio/status/{job_id}",
-            "remaining_credits": current_user.credits - 5
+            "remaining_credits": 5000 if is_demo_user else current_user.credits - 5
         }
         
     except HTTPException:

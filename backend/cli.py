@@ -164,9 +164,18 @@ def test_basic_integration(args):
         result = pipeline.process_video(test_video, args.target_lang)
         processing_time = time.time() - start_time
 
-        # Generate basic report
-        output_path = result.get('output_path', 'backend/outputs/translated_sample_30s_en.mp4')
-        output_exists = os.path.exists(output_path) if output_path != 'N/A' else False
+        # Check if result indicates success
+        if not result.get('success', False):
+            print(f"\nVideo Translation Test Results:")
+            print(f"   Input: {test_video}")
+            print(f"   Error: {result.get('error', 'Unknown error')}")
+            print(f"   Processing time: {processing_time:.1f}s")
+            print(f"   Status: FAILED")
+            return 1
+
+        # Get actual output path from result (not hardcoded!)
+        output_path = result.get('output_video', '')
+        output_exists = os.path.exists(output_path) if output_path else False
 
         print(f"\nVideo Translation Test Results:")
         print(f"   Input: {test_video}")
@@ -189,6 +198,7 @@ def test_basic_integration(args):
         }
 
         report_path = "artifacts/integration_test_report.json"
+        os.makedirs(os.path.dirname(report_path), exist_ok=True)
         with open(report_path, 'w') as f:
             json.dump(report, f, indent=2)
 
@@ -221,6 +231,10 @@ def test_comprehensive_integration(args):
 
     total_start_time = time.time()
 
+    # Create test_outputs directory (cross-platform)
+    test_outputs_dir = os.path.join("backend", "test_outputs")
+    os.makedirs(test_outputs_dir, exist_ok=True)
+
     try:
         # Phase 1: Video Translation Test
         print("\n🎬 Phase 1: Testing Video Translation Job")
@@ -231,17 +245,16 @@ def test_comprehensive_integration(args):
         video_result = pipeline.process_video(test_video, args.target_lang)
         video_time = time.time() - video_start
 
-        video_output = video_result.get('output_path', 'backend/outputs/translated_video.mp4')
-        # Check multiple possible output locations since video pipeline may use different naming
-        video_success = False
-        if video_output and video_output != 'N/A':
-            video_success = os.path.exists(video_output)
-        # Also check the standard output location
-        if not video_success:
-            standard_output = 'backend/outputs/translated_sample_30s_en.mp4'
-            video_success = os.path.exists(standard_output)
-            if video_success:
+        # Get actual output path from result (not hardcoded!)
+        video_output = video_result.get('output_video', '') if video_result.get('success') else ''
+        video_success = os.path.exists(video_output) if video_output else False
+
+        # Only check for standard output if pipeline failed
+        if not video_success and video_result.get('success'):
+            standard_output = os.path.join('backend', 'outputs', 'translated_sample_30s_en.mp4')
+            if os.path.exists(standard_output):
                 video_output = standard_output
+                video_success = True
 
         results["video_translation"] = {
             "status": "PASSED" if video_success else "FAILED",
@@ -258,8 +271,8 @@ def test_comprehensive_integration(args):
         print("\n🎵 Phase 2: Testing Audio Translation Job")
         print("-" * 40)
 
-        # Extract audio from video
-        audio_file = f"backend/test_outputs/extracted_audio_{int(time.time())}.wav"
+        # Extract audio from video (cross-platform path)
+        audio_file = os.path.join(test_outputs_dir, f"extracted_audio_{int(time.time())}.wav")
         print(f"   Extracting audio to: {audio_file}")
 
         if extract_audio_from_video(test_video, audio_file):
@@ -315,8 +328,8 @@ def test_comprehensive_integration(args):
             # If SubtitleGenerator fails, create a basic subtitle file manually
             print(f"   SubtitleGenerator failed ({e}), creating basic subtitles manually...")
 
-            # Create a simple SRT file with basic timing
-            subtitle_output = "backend/test_outputs/generated_subtitles.srt"
+            # Create a simple SRT file with basic timing (cross-platform path)
+            subtitle_output = os.path.join(test_outputs_dir, "generated_subtitles.srt")
             srt_content = """1
 00:00:00,000 --> 00:00:10,000
 Sample subtitle text for testing.
@@ -423,14 +436,20 @@ def get_test_video(args):
     """Get test video from args, default, or user input"""
     # Check command line argument first
     if hasattr(args, 'input') and args.input:
-        if args.input.startswith(('http://', 'https://')):
+        # Remove surrounding quotes if present (from shell quoting)
+        input_path = args.input
+        if (input_path.startswith('"') and input_path.endswith('"')) or \
+           (input_path.startswith("'") and input_path.endswith("'")):
+            input_path = input_path[1:-1]
+        
+        if input_path.startswith(('http://', 'https://')):
             # Handle URL download
             try:
                 import requests
                 import tempfile
 
-                print(f"Downloading video from URL: {args.input}")
-                response = requests.get(args.input, stream=True, timeout=30)
+                print(f"Downloading video from URL: {input_path}")
+                response = requests.get(input_path, stream=True, timeout=30)
                 response.raise_for_status()
 
                 with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
@@ -441,10 +460,10 @@ def get_test_video(args):
             except Exception as e:
                 print(f"Failed to download video: {e}")
                 return None
-        elif os.path.exists(args.input):
-            return args.input
+        elif os.path.exists(input_path):
+            return input_path
         else:
-            print(f"File not found: {args.input}")
+            print(f"File not found: {input_path}")
             return None
 
     # Check for default test sample
@@ -462,6 +481,11 @@ def get_test_video(args):
 
     while True:
         video_input = input("Enter video file path or URL: ").strip()
+
+        # Remove surrounding quotes if present
+        if (video_input.startswith('"') and video_input.endswith('"')) or \
+           (video_input.startswith("'") and video_input.endswith("'")):
+            video_input = video_input[1:-1]
 
         if not video_input:
             print("Please enter a valid file path or URL")

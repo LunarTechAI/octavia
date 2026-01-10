@@ -138,6 +138,31 @@ async def login(request: Request):
         if not email or not password:
             raise ValidationError("Email and password are required")
 
+        # Check for demo mode login (only works when DEMO_MODE=true)
+        if DEMO_MODE and email == "demo@octavia.com" and password == "demo123":
+            logger.info(f"Demo user logged in")
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            access_token = create_access_token(
+                data={"sub": "demo-user-id", "email": "demo@octavia.com"},
+                expires_delta=access_token_expires
+            )
+            return {
+                "success": True,
+                "message": "Login successful",
+                "token": access_token,
+                "user": {
+                    "id": "demo-user-id",
+                    "email": "demo@octavia.com",
+                    "name": "Demo User",
+                    "credits": 5000,
+                    "verified": True
+                }
+            }
+
+        # Regular login requires Supabase to be configured
+        if supabase is None:
+            raise AuthenticationError("Database not configured. Please set up Supabase or use demo mode.")
+
         response = supabase.table("users").select("*").eq("email", email).execute()
 
         if not response.data:

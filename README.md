@@ -13,6 +13,76 @@
 
 ---
 
+## ⚡ Quick Demo Testing (5 Minutes)
+
+Want to test Octavia fast? No database setup required! Use **Demo Mode**:
+
+### Linux / macOS
+```bash
+# 1. Setup backend
+cd backend
+pip install -r requirements.txt
+
+# 2. Run comprehensive test (all job types)
+DEMO_MODE=true python cli.py test-integration --comprehensive --input test_samples/sample_30s_en.mp4
+
+# 3. Start backend API (in another terminal)
+cd backend
+DEMO_MODE=true python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# 4. Start frontend (in another terminal)
+cd ../octavia-web
+npm install && npm run dev
+```
+
+### Windows (Command Prompt)
+```cmd
+:: 1. Setup backend
+cd backend
+pip install -r requirements.txt
+
+:: 2. Run comprehensive test (all job types)
+set DEMO_MODE=true
+python cli.py test-integration --comprehensive --input test_samples/sample_30s_en.mp4
+
+:: 3. Start backend API (in another terminal)
+cd backend
+set DEMO_MODE=true
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+:: 4. Start frontend (in another terminal)
+cd ..\octavia-web
+npm install && npm run dev
+```
+
+### Windows (PowerShell)
+```powershell
+# 1. Setup backend
+cd backend
+pip install -r requirements.txt
+
+# 2. Run comprehensive test (all job types)
+$env:DEMO_MODE="true"
+python cli.py test-integration --comprehensive --input test_samples/sample_30s_en.mp4
+
+# 3. Start backend API (in another terminal)
+cd backend
+$env:DEMO_MODE="true"
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# 4. Start frontend (in another terminal)
+cd ..\octavia-web
+npm install; npm run dev
+```
+
+### 🎯 Demo Credentials
+- **Email:** `demo@octavia.com`
+- **Password:** `demo123`
+
+> **Note:** The Supabase warning in demo mode is expected and can be ignored. All features work without a database!
+
+---
+
 ## 📑 Table of Contents
 - [Core Features](#-core-features)
 - [Technical Capabilities](#-technical-capabilities)
@@ -23,6 +93,7 @@
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
 - [License & Credits](#-license--credits)
+- [AI Orchestrator Setup](#-ai-orchestrator-model-setup)
 
 ---
 
@@ -77,6 +148,8 @@ Video Input → Audio Extraction → Chunking → STT → Translation → TTS �
 - **Hardware**: 4GB RAM minimum, 8GB recommended
 
 ### Quick Start (5 Minutes)
+
+#### 🐧 Linux / macOS
 ```bash
 # 1. Clone and setup backend (required)
 cd backend
@@ -92,6 +165,34 @@ npm run dev  # Opens at http://localhost:3000
 docker-compose up --build  # Both backend + frontend in one command
 ```
 
+#### 🪟 Windows (Command Prompt / PowerShell)
+```cmd
+:: 1. Clone and setup backend (required)
+cd backend
+pip install -r requirements.txt
+set DEMO_MODE=true
+python cli.py test-integration  :: Verify everything works
+
+:: 2. Setup frontend (optional, for UI development)
+cd ..\octavia-web
+npm install
+npm run dev  :: Opens at http://localhost:3000
+
+:: 3. Full application (recommended for complete experience)
+docker-compose up --build  :: Both backend + frontend in one command
+```
+
+#### 🐧 Windows (WSL2 - Recommended for Linux-like experience)
+```bash
+# Same commands as Linux/macOS
+cd backend
+pip install -r requirements.txt
+DEMO_MODE=true python cli.py test-integration
+cd ../octavia-web
+npm install && npm run dev
+docker-compose up --build
+```
+
 ### Environment Setup
 **For Contributors**: You can skip this section! Use demo mode instead.
 
@@ -103,20 +204,47 @@ For full setup with real database:
 ### One-Command Setup & Run
 
 #### Backend Setup
+
+**Linux / macOS:**
 ```bash
 cd backend
 pip install -r requirements.txt
 python cli.py test-integration  # Verify everything works
 ```
 
+**Windows (Command Prompt / PowerShell):**
+```cmd
+cd backend
+pip install -r requirements.txt
+python cli.py test-integration
+```
+
+**Windows (WSL2):**
+```bash
+cd backend
+pip install -r requirements.txt
+python cli.py test-integration
+```
+
 #### Frontend Setup
+
+**Linux / macOS:**
 ```bash
 cd octavia-web
 npm install
 npm run dev  # Development server at http://localhost:3000
 ```
 
+**Windows (Command Prompt / PowerShell):**
+```cmd
+cd octavia-web
+npm install
+npm run dev
+```
+
 #### Full Application (Recommended)
+
+**Linux / macOS:**
 ```bash
 # Terminal 1: Backend API (with demo mode available)
 cd backend
@@ -127,17 +255,133 @@ cd octavia-web
 npm run dev
 ```
 
+**Windows (Command Prompt / PowerShell):**
+```cmd
+:: Terminal 1: Backend API
+cd backend
+set DEMO_MODE=true
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+:: OR for PowerShell (use $env: syntax):
+cd backend
+$env:DEMO_MODE="true"
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+:: Terminal 2: Frontend
+cd octavia-web
+npm run dev
+```
+
+**Windows (WSL2):**
+```bash
+# Terminal 1: Backend API
+cd backend
+DEMO_MODE=true python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# Terminal 2: Frontend
+cd octavia-web
+npm run dev
+```
+
+### 🧠 AI Orchestrator Model Setup
+
+The AI Orchestrator (`backend/modules/ai_orchestrator.py`) manages intelligent decision-making for the translation pipeline. You can optionally configure it to use local AI models for enhanced control and privacy.
+
+**Prerequisite:** Ensure [Ollama](https://ollama.com) is installed and running on your system with the recommended model pulled: `ollama pull qwen-coder`.
+
+#### Using Ollama (Local LLM)
+
+Ollama provides local AI model inference for the orchestrator:
+
+**Linux / macOS:**
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start Ollama service
+sudo systemctl start ollama
+
+# Pull the recommended model for AI Orchestrator
+ollama pull qwen-coder
+```
+
+**Windows:**
+```cmd
+:: Install Ollama
+winget install Ollama.Ollama
+
+:: Start Ollama service (run as administrator)
+net start ollama
+
+:: Pull the recommended model for AI Orchestrator
+ollama pull qwen-coder
+```
+
+**Windows (WSL2):**
+```bash
+# Install Ollama in WSL2
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start service
+sudo systemctl start ollama
+ollama pull qwen-coder
+```
+
+#### Benefits of Local AI Model
+
+- **Privacy**: No data leaves your machine
+- **Cost Control**: No API usage fees
+- **Customization**: Fine-tune models for your domain
+- **Offline Operation**: Works without internet
+
+#### Fallback Behavior
+
+If no local model is configured, the orchestrator uses default heuristics for:
+- Chunk size optimization
+- Translation quality assessment
+- Voice selection recommendations
+- Error recovery strategies
+
 ### Docker Setup
 
 #### Full Stack (Recommended)
 This will start both the Backend (API) and Frontend (Web UI).
+
+**Linux / macOS:**
 ```bash
 docker-compose up --build
 ```
+
+**Windows (Command Prompt / PowerShell):**
+```cmd
+docker-compose up --build
+```
+
+**Windows (WSL2):**
+```bash
+docker-compose up --build
+```
+
 - **Frontend**: http://localhost:3000
 - **Backend**: http://localhost:8000
 
 #### Backend Only
+
+**Linux / macOS:**
+```bash
+cd backend
+docker build -t octavia-backend .
+docker run -e DEMO_MODE=true -p 8000:8000 octavia-backend
+```
+
+**Windows (Command Prompt / PowerShell):**
+```cmd
+cd backend
+docker build -t octavia-backend .
+docker run -e DEMO_MODE=true -p 8000:8000 octavia-backend
+```
+
+**Windows (WSL2):**
 ```bash
 cd backend
 docker build -t octavia-backend .
@@ -183,6 +427,8 @@ To test the application without setting up a full database (Supabase), you can u
 ## 🎮 Usage Examples
 
 ### CLI Commands
+
+> **Note:** All CLI commands must be run from the `backend` directory: `cd backend`
 
 The Octavia CLI (`cli.py`) is the **heart of the system** - providing comprehensive testing, development tools, and production capabilities. It's designed for contributors to validate the entire video translation pipeline with a single command.
 
@@ -657,6 +903,8 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000
 ### Common Issues
 
 **"Module not found" errors:**
+
+**Linux / macOS:**
 ```bash
 # Backend dependencies
 cd backend && pip install -r requirements.txt
@@ -665,17 +913,51 @@ cd backend && pip install -r requirements.txt
 cd octavia-web && npm install
 ```
 
+**Windows (Command Prompt / PowerShell):**
+```cmd
+:: Backend dependencies
+cd backend
+pip install -r requirements.txt
+
+:: Frontend dependencies
+cd ..\octavia-web
+npm install
+```
+
 **"Demo mode not working":**
+
+**Linux / macOS:**
 ```bash
-# Make sure to set the environment variable
 cd backend
 DEMO_MODE=true python -m uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
+**Windows (Command Prompt):**
+```cmd
+cd backend
+set DEMO_MODE=true
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+**Windows (PowerShell):**
+```powershell
+cd backend
+$env:DEMO_MODE="true"
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# Note: You may see a Supabase warning - this is expected in demo mode and can be ignored.
+```
+
 **"CLI test fails":**
+
+**Linux / macOS:**
 ```bash
-# Try with a different video or use the included sample
 python cli.py test-integration --input backend/test_samples/sample_30s_en.mp4
+```
+
+**Windows (Command Prompt / PowerShell):**
+```cmd
+python cli.py test-integration --input backend\test_samples\sample_30s_en.mp4
 ```
 
 **"Out of memory" errors:**
@@ -687,6 +969,35 @@ python cli.py test-integration --input backend/test_samples/sample_30s_en.mp4
 - Use demo mode: `DEMO_MODE=true`
 - Check your `.env` file has correct Supabase credentials
 - Verify Supabase project is active
+
+### Windows-Specific Issues
+
+**Port already in use (Windows):**
+```cmd
+:: Find process using port 8000
+netstat -ano | findstr :8000
+
+:: Kill the process (replace PID with actual process ID)
+taskkill /PID <PID> /F
+```
+
+**WSL2 not recognized:**
+```cmd
+:: Check WSL installation
+wsl --list
+
+:: Set WSL as default (run in PowerShell as Administrator)
+wsl --setdefault Ubuntu
+```
+
+**Docker Desktop not running:**
+```cmd
+:: Start Docker Desktop manually or via command
+start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+
+:: Verify Docker is running
+docker version
+```
 
 ### Getting Help
 - **Check existing issues** on GitHub for similar problems
@@ -871,4 +1182,3 @@ This project is open source and available under the **MIT License**.
 - **Real-time Processing**: Live progress updates.
 - **Modular Architecture**: Clean separation of concerns.
 - **Production Ready**: Built with persistent storage and error handling.
-
