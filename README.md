@@ -13,7 +13,7 @@
 
 ---
 
-## ⚡ Quick Demo Testing (5 Minutes)
+## Quick Demo Testing (5 Minutes)
 
 Want to test Octavia fast? No database setup required! Use **Demo Mode**:
 
@@ -75,7 +75,7 @@ cd ..\octavia-web
 npm install; npm run dev
 ```
 
-### 🎯 Demo Credentials
+### Demo Credentials
 - **Email:** `demo@octavia.com`
 - **Password:** `demo123`
 
@@ -83,29 +83,29 @@ npm install; npm run dev
 
 ---
 
-## 📑 Table of Contents
-- [Core Features](#-core-features)
-- [Technical Capabilities](#-technical-capabilities)
-- [Developer Quick Start](#-developer-quick-start)
-- [Try the Demo](#-try-the-demo)
-- [Technical Specifications](#-technical-specifications)
-- [Project Structure](#-project-structure)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License & Credits](#-license--credits)
-- [AI Orchestrator Setup](#-ai-orchestrator-model-setup)
+## Table of Contents
+- [Core Features](#core-features)
+- [Technical Capabilities](#technical-capabilities)
+- [Developer Quick Start](#developer-quick-start)
+- [Try the Demo](#try-the-demo)
+- [Technical Specifications](#technical-specifications)
+- [Project Structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License & Credits](#license--credits)
+- [AI Orchestrator Setup](#ai-orchestrator-model-setup)
 
 ---
 
-## 🎯 Core Features
+## Core Features
 
-- ✅ **Video Translation**: Complete video dubbing with lip-sync accuracy
-- ✅ **Audio Translation**: Podcast and audio file translation
-- ✅ **Subtitle Generation**: AI-powered subtitle creation from video/audio
-- ✅ **Subtitle Translation**: Context-aware subtitle translation
-- ✅ **Advanced UI**: Modern dashboard with real-time progress tracking
+- **Video Translation**: Complete video dubbing with lip-sync accuracy
+- **Audio Translation**: Podcast and audio file translation
+- **Subtitle Generation**: AI-powered subtitle creation from video/audio
+- **Subtitle Translation**: Context-aware subtitle translation
+- **Advanced UI**: Modern dashboard with real-time progress tracking
 
-## 🎯 Technical Capabilities
+## Technical Capabilities
 
 - **End-to-End Pipeline**: Complete video ingestion → transcription → translation → TTS → synchronization → export
 - **Duration Fidelity**: Final output duration matches input exactly (within container constraints)
@@ -119,27 +119,27 @@ npm install; npm run dev
 ### Backend Pipeline
 ```mermaid
 graph TD
-    A[Video Input] -->|FFmpeg| B(Audio Extraction)
-    B -->|FFmpeg| C(Chunking)
-    C -->|AI Orchestrator| D{Processing}
-    D -->|Whisper| E[STT]
-    E -->|Helsinki-NLP| F[Translation]
-    F -->|Edge-TTS| G[TTS]
-    G -->|pydub| H(Sync)
-    H -->|FFmpeg| I(Merge)
-    I -->|FFmpeg| J[Video Output]
+ A[Video Input] -->|FFmpeg| B(Audio Extraction)
+ B -->|FFmpeg| C(Chunking)
+ C -->|AI Orchestrator| D{Processing}
+ D -->|Whisper| E[STT]
+ E -->|Helsinki-NLP| F[Translation]
+ F -->|Edge-TTS| G[TTS]
+ G -->|pydub| H(Sync)
+ H -->|FFmpeg| I(Merge)
+ I -->|FFmpeg| J[Video Output]
 ```
 
 ```
 Video Input → Audio Extraction → Chunking → STT → Translation → TTS → Sync → Merge → Video Output
-     ↓           ↓            ↓       ↓        ↓        ↓     ↓      ↓       ↓
-   FFmpeg     FFmpeg       AI      Whisper   Helsinki   Edge  pydub  FFmpeg  FFmpeg
-   (probe)    (extract)   Orchestrator (transcribe) (opus-mt) (TTS) (sync) (merge) (mux)
+ ↓ ↓ ↓ ↓ ↓ ↓ ↓ ↓ ↓
+ FFmpeg FFmpeg AI Whisper Helsinki Edge pydub FFmpeg FFmpeg
+ (probe) (extract) Orchestrator (transcribe) (opus-mt) (TTS) (sync) (merge) (mux)
 ```
 
 ---
 
-## 🚀 Developer Quick Start
+## Developer Quick Start
 
 ### Prerequisites
 - **Python**: 3.11+ (backend only)
@@ -149,40 +149,40 @@ Video Input → Audio Extraction → Chunking → STT → Translation → TTS �
 
 ### Quick Start (5 Minutes)
 
-#### 🐧 Linux / macOS
+#### Linux / macOS
 ```bash
 # 1. Clone and setup backend (required)
 cd backend
 pip install -r requirements.txt
-DEMO_MODE=true python cli.py test-integration  # Verify everything works
+DEMO_MODE=true python cli.py test-integration # Verify everything works
 
 # 2. Setup frontend (optional, for UI development)
 cd ../octavia-web
 npm install
-npm run dev  # Opens at http://localhost:3000
+npm run dev # Opens at http://localhost:3000
 
 # 3. Full application (recommended for complete experience)
-docker-compose up --build  # Both backend + frontend in one command
+docker-compose up --build # Both backend + frontend in one command
 ```
 
-#### 🪟 Windows (Command Prompt / PowerShell)
+#### Windows (Command Prompt / PowerShell)
 ```cmd
 :: 1. Clone and setup backend (required)
 cd backend
 pip install -r requirements.txt
 set DEMO_MODE=true
-python cli.py test-integration  :: Verify everything works
+python cli.py test-integration :: Verify everything works
 
 :: 2. Setup frontend (optional, for UI development)
 cd ..\octavia-web
 npm install
-npm run dev  :: Opens at http://localhost:3000
+npm run dev :: Opens at http://localhost:3000
 
 :: 3. Full application (recommended for complete experience)
-docker-compose up --build  :: Both backend + frontend in one command
+docker-compose up --build :: Both backend + frontend in one command
 ```
 
-#### 🐧 Windows (WSL2 - Recommended for Linux-like experience)
+#### Windows (WSL2 - Recommended for Linux-like experience)
 ```bash
 # Same commands as Linux/macOS
 cd backend
@@ -209,7 +209,7 @@ For full setup with real database:
 ```bash
 cd backend
 pip install -r requirements.txt
-python cli.py test-integration  # Verify everything works
+python cli.py test-integration # Verify everything works
 ```
 
 **Windows (Command Prompt / PowerShell):**
@@ -232,7 +232,7 @@ python cli.py test-integration
 ```bash
 cd octavia-web
 npm install
-npm run dev  # Development server at http://localhost:3000
+npm run dev # Development server at http://localhost:3000
 ```
 
 **Windows (Command Prompt / PowerShell):**
@@ -283,7 +283,7 @@ cd octavia-web
 npm run dev
 ```
 
-### 🧠 AI Orchestrator Model Setup
+### AI Orchestrator Model Setup
 
 The AI Orchestrator (`backend/modules/ai_orchestrator.py`) manages intelligent decision-making for the translation pipeline. You can optionally configure it to use local AI models for enhanced control and privacy.
 
@@ -390,20 +390,20 @@ docker run -e DEMO_MODE=true -p 8000:8000 octavia-backend
 
 ---
 
-## 🧪 Try the Demo
+## Try the Demo
 
 To test the application without setting up a full database (Supabase), you can use the integrated Demo Mode:
 
 1. Set the environment variable `DEMO_MODE=true` when running the backend.
 2. Use the **Try Demo Account** button on the login page, or:
-   - **Email:** `demo@octavia.com`
-   - **Password:** `demo123`
+ - **Email:** `demo@octavia.com`
+ - **Password:** `demo123`
 
 **Note:** In demo mode, all features work for the demo account, even if Supabase/database is unavailable. Real users still require Supabase keys.
 
 ---
 
-## 📊 Technical Specifications
+## Technical Specifications
 
 ### Performance Metrics
 - **Processing Speed**: ~3-4x realtime on modern hardware (Intel i7/Ryzen 7)
@@ -424,7 +424,7 @@ To test the application without setting up a full database (Supabase), you can u
 - **Target**: English, Russian, German, Spanish, French
 - **Translation Pairs**: All combinations via Helsinki-NLP models
 
-## 🎮 Usage Examples
+## Usage Examples
 
 ### CLI Commands
 
@@ -432,54 +432,54 @@ To test the application without setting up a full database (Supabase), you can u
 
 The Octavia CLI (`cli.py`) is the **heart of the system** - providing comprehensive testing, development tools, and production capabilities. It's designed for contributors to validate the entire video translation pipeline with a single command.
 
-#### 🎯 Primary Purpose: Comprehensive Integration Testing
+#### Primary Purpose: Comprehensive Integration Testing
 
 Test the complete video translation system with all job types using one command:
 
 ```bash
-# 🧪 Test ALL job types (Video, Audio, Subtitles) - RECOMMENDED for contributors
+# Test ALL job types (Video, Audio, Subtitles) - RECOMMENDED for contributors
 python cli.py test-integration --comprehensive --input test_samples/sample_30s_en.mp4
 
-# 📹 Basic video translation test only
+# Basic video translation test only
 python cli.py test-integration --input /path/to/your/video.mp4 --target-lang es
 
-# 🌐 Test with video from URL
+# Test with video from URL
 python cli.py test-integration --input https://example.com/sample.mp4 --target-lang fr
 
-# 💬 Interactive mode (prompts for input)
+# Interactive mode (prompts for input)
 python cli.py test-integration
 ```
 
-#### 📊 What Comprehensive Testing Validates
+#### What Comprehensive Testing Validates
 
 The `--comprehensive` flag tests the **complete pipeline**:
 
 ```
 Input: video.mp4
-├── 🎬 Video Translation Job (4-5 min)
-│   ├── Audio extraction + chunking
-│   ├── STT → Translation → TTS
-│   ├── Video merging with lip-sync
-│   └── Quality validation
+├── Video Translation Job (4-5 min)
+│ ├── Audio extraction + chunking
+│ ├── STT → Translation → TTS
+│ ├── Video merging with lip-sync
+│ └── Quality validation
 │
-├── 🎵 Audio Translation Job (3-4 min)
-│   ├── Audio extraction from video
-│   ├── STT → Translation → TTS
-│   └── Audio output generation
+├── Audio Translation Job (3-4 min)
+│ ├── Audio extraction from video
+│ ├── STT → Translation → TTS
+│ └── Audio output generation
 │
-├── 📝 Subtitle Generation Job (0.5-1 min)
-│   ├── Audio transcription
-│   ├── SRT/VTT file creation
-│   └── Timing validation
+├── Subtitle Generation Job (0.5-1 min)
+│ ├── Audio transcription
+│ ├── SRT/VTT file creation
+│ └── Timing validation
 │
-└── 🌐 Subtitle Translation Job (framework ready)
-    ├── Translation framework validation
-    └── Output format verification
+└── Subtitle Translation Job (framework ready)
+ ├── Translation framework validation
+ └── Output format verification
 ```
 
 **Test Results**: All tests pass with detailed reporting and performance metrics.
 
-#### 🔧 Additional CLI Commands
+#### Additional CLI Commands
 
 ```bash
 # Direct video translation (production use)
@@ -495,20 +495,20 @@ python cli.py audio --input audio.wav --source-lang en --target-lang es
 python cli.py metrics
 ```
 
-#### 🎯 CLI for Contributors
+#### CLI for Contributors
 
 The CLI is **contributor-first** designed:
 
-- **✅ Zero Setup**: Works with existing backend dependencies
-- **✅ Comprehensive Validation**: Tests entire system with one command
-- **✅ Flexible Input**: Local files, URLs, or interactive prompts
-- **✅ Professional Output**: Clean, technical formatting
-- **✅ Quality Assurance**: Validates all pipeline components
-- **✅ Regression Prevention**: Catches issues before they reach production
-- **✅ Performance Metrics**: Detailed timing and resource usage
-- **✅ Easy Debugging**: Clear error messages and diagnostic information
+- ** Zero Setup**: Works with existing backend dependencies
+- ** Comprehensive Validation**: Tests entire system with one command
+- ** Flexible Input**: Local files, URLs, or interactive prompts
+- ** Professional Output**: Clean, technical formatting
+- ** Quality Assurance**: Validates all pipeline components
+- ** Regression Prevention**: Catches issues before they reach production
+- ** Performance Metrics**: Detailed timing and resource usage
+- ** Easy Debugging**: Clear error messages and diagnostic information
 
-#### 📋 Input Options
+#### Input Options
 
 - **Local Files**: Any MP4/AVI/MOV video file
 - **URLs**: Direct HTTP/HTTPS download and processing
@@ -516,14 +516,22 @@ The CLI is **contributor-first** designed:
 - **Default Detection**: Auto-offers included test samples
 - **Batch Processing**: Scriptable for multiple files
 
-#### 🏆 Success Criteria
+#### Success Criteria
 
 **Comprehensive Test Results:**
 ```
-Video Translation    PASSED   266.6s
-Audio Translation    PASSED   213.5s
-Subtitle Generation  PASSED   42.2s
-Subtitle Translation PASSED   0.0s
+============================================================
+COMPREHENSIVE TEST RESULTS SUMMARY
+============================================================
+
+Input file: test_samples/sample_30s_en.mp4
+Target language: es
+Total test duration: 280.6s
+
+Video Translation      PASSED      150.4s
+Audio Translation      PASSED      107.6s
+Subtitle Generation    PASSED      22.1s
+Subtitle Translation   PASSED      0.0s
 
 Overall Status: ✅ ALL TESTS PASSED
 ```
@@ -540,114 +548,107 @@ curl http://localhost:8000/languages
 
 # Start video translation
 curl -X POST http://localhost:8000/translate/video \
-  -F "file=@sample.mp4" \
-  -F "target_lang=es"
+ -F "file=@sample.mp4" \
+ -F "target_lang=es"
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 octavia/
-├── backend/                    # Python backend
-│   ├── app.py                 # FastAPI application
-│   ├── cli.py                 # Command-line interface
-│   ├── config.yaml            # Configuration file
-│   ├── requirements.txt       # Python dependencies
-│   ├── Dockerfile             # Container definition
-│   ├── modules/               # Core modules
-│   │   ├── pipeline.py        # Main processing pipeline
-│   │   ├── audio_translator.py # Audio processing & Dubbing
-│   │   ├── subtitle_generator.py # STT & Subtitle generation
-│   │   ├── subtitle_translator.py # Subtitle translation
-│   │   ├── instrumentation.py # Logging & metrics
-│   │   └── ai_orchestrator.py # AI decision making
-│   ├── routes/                # API endpoints
-│   ├── services/              # Business logic services
-│   │   ├── job_storage.py     # Unified job persistence (Supabase)
-│   │   ├── audio_quality.py   # Audio analysis & verification
-│   │   └── job_service.py     # Job management logic
-│   ├── migrations/             # Database migrations
-│   │   ├── 001_add_job_persistence.sql
-│   │   └── migrate_jobs_to_supabase.py
-│   ├── tests/                 # Unit tests
-│   └── test_samples/          # Test assets
-├── octavia-web/               # Next.js frontend
-│   ├── app/                   # Next.js app router
-│   ├── dashboard/             # Dashboard pages
-│   ├── components/            # React components
-│   ├── hooks/                 # Custom React hooks
-│   ├── contexts/              # Global state contexts
-│   ├── lib/                   # Utilities and API client
-│   ├── types/                 # TypeScript definitions
-│   ├── package.json           # Node dependencies
-│   └── public/                # Static assets
-├── documentation/             # Technical docs
-├── artifacts/                 # Logs and outputs
-└── README.md                  # This file
+├── backend/ # Python backend
+│ ├── app.py # FastAPI application
+│ ├── cli.py # Command-line interface
+│ ├── config.yaml # Configuration file
+│ ├── requirements.txt # Python dependencies
+│ ├── Dockerfile # Container definition
+│ ├── modules/ # Core modules
+│ │ ├── pipeline.py # Main processing pipeline
+│ │ ├── audio_translator.py # Audio processing & Dubbing
+│ │ ├── subtitle_generator.py # STT & Subtitle generation
+│ │ ├── subtitle_translator.py # Subtitle translation
+│ │ ├── instrumentation.py # Logging & metrics
+│ │ └── ai_orchestrator.py # AI decision making
+│ ├── routes/ # API endpoints
+│ ├── services/ # Business logic services
+│ │ ├── job_storage.py # Unified job persistence (Supabase)
+│ │ ├── audio_quality.py # Audio analysis & verification
+│ │ └── job_service.py # Job management logic
+│ ├── migrations/ # Database migrations
+│ │ ├── 001_add_job_persistence.sql
+│ │ └── migrate_jobs_to_supabase.py
+│ ├── tests/ # Unit tests
+│ └── test_samples/ # Test assets
+├── octavia-web/ # Next.js frontend
+│ ├── app/ # Next.js app router
+│ ├── dashboard/ # Dashboard pages
+│ ├── components/ # React components
+│ ├── hooks/ # Custom React hooks
+│ ├── contexts/ # Global state contexts
+│ ├── lib/ # Utilities and API client
+│ ├── types/ # TypeScript definitions
+│ ├── package.json # Node dependencies
+│ └── public/ # Static assets
+├── documentation/ # Technical docs
+├── artifacts/ # Logs and outputs
+└── README.md # This file
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Backend Configuration (config.yaml)
 ```yaml
 models:
-  whisper:
-    model_size: "large"
-    language: "auto"
-  translation:
-    en_es_model: "Helsinki-NLP/opus-mt-en-es"
-  tts:
-    spanish_voice: "es-ES-ElviraNeural"
+ whisper:
+ model_size: "large"
+ language: "auto"
+ translation:
+ en_es_model: "Helsinki-NLP/opus-mt-en-es"
+ tts:
+ spanish_voice: "es-ES-ElviraNeural"
 
 processing:
-  default_chunk_size: 30  # seconds
-  max_duration_diff_ms: 200
-  max_condensation_ratio: 1.2
+ default_chunk_size: 30 # seconds
+ max_duration_diff_ms: 200
+ max_condensation_ratio: 1.2
 
 logging:
-  output_dir: "artifacts"
-  log_file: "logs.jsonl"
+ output_dir: "artifacts"
+ log_file: "logs.jsonl"
 ```
 
 ---
 
-## 📈 Feature Status & Changelog
+## Feature Status & Changelog
 
 ### Version 1.2.0 (January 2026)
-**Current Status**: 🟢 **Stable**
+**Current Status**: **Stable**
 
-#### ✅ Available Features
+#### Available Features
 - **Video & Audio Pipeline**: Fully functional with high-fidelity outputs.
 - **Job Persistence**: Supabase integration ensures jobs survive restarts.
 - **Demo Capability**: One-click demo mode without database requirements.
 - **History & Payments**: Full user dashboard functionality.
 
-#### 🚧 Known Issues
+#### Known Issues
 
 **High Priority:**
-- ✅ **Dependency Conflicts**: FIXED - Changed `torch==2.1.2+cu121` to `torch==2.1.2` (CPU-only), pinned `numpy==1.26.4` for compatibility
 - **Port Conflicts**: Multiple uvicorn instances fighting for port 8000 cause uploads to hang and API timeouts. Implement PID check/lock file before starting.
-- ✅ **Log File Growth**: FIXED - Added `RotatingFileHandler` with 10MB max file size and 5 backup files in `app.py`
 - **CPU-Only Processing**: Using CPU-only torch slows translation. For GPU support, run: `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
 - **Progress Tracker Issues**: Frontend progress updates are inconsistent due to multiple storage backends and port conflicts. See [Progress Tracker Fix Hints](#-progress-tracker-fix-hints).
 
 **Medium Priority:**
-- ✅ **Docker Configuration**: FIXED - Added environment variables, frontend healthcheck, log persistence, and `.env` file support
-- ✅ **Frontend/Backend Version Mismatch**: FIXED - Updated README badge from Next.js 14.0 to 16.0.3 to match `package.json`
 - **Hardcoded Paths**: File paths like `backend/temp_video_*` break in Docker. Use configurable base paths via environment variables.
-- ✅ **Temp File Accumulation**: FIXED - Added patterns to `.gitignore` and created `cleanup_utils.py` for automatic cleanup
 
 **Lower Priority:**
-- ✅ **Missing Error Handling**: FIXED - Added exponential backoff retry and circuit breaker pattern for Supabase operations
 - **Inconsistent API Responses**: Different endpoints return different response structures. Standardize all API responses.
 - **No Rate Limiting**: All endpoints lack rate limiting. Implement per-user/IP rate limiting.
-- ✅ **Missing Tests**: FIXED - Created comprehensive test suite in `backend/tests/` with pytest fixtures, API tests, and job tests
 
 *Contributing Fixes Welcome!*
 
 ---
 
-## 🧪 How to Test Before Committing
+## How to Test Before Committing
 
 ### Quick Verification Commands:
 
@@ -675,15 +676,15 @@ cd backend && python -c "
 from services.db_utils import with_retry
 import asyncio
 async def test():
-    count = 0
-    async def fail_twice():
-        nonlocal count
-        count += 1
-        if count < 3:
-            raise Exception('transient error 503')
-        return 'success'
-    result = await with_retry(fail_twice, max_retries=3)
-    print(f'Retry test passed: {result}')
+ count = 0
+ async def fail_twice():
+ nonlocal count
+ count += 1
+ if count < 3:
+ raise Exception('transient error 503')
+ return 'success'
+ result = await with_retry(fail_twice, max_retries=3)
+ print(f'Retry test passed: {result}')
 asyncio.run(test())
 "
 
@@ -721,7 +722,7 @@ docker-compose down
 
 ---
 
-## 🔧 Progress Tracker Fix Hints
+## Progress Tracker Fix Hints
 
 The frontend progress tracker (UI updates) can be inconsistent due to several interconnected issues. Here are hints to fix them:
 
@@ -737,21 +738,21 @@ The frontend progress tracker (UI updates) can be inconsistent due to several in
 **Hint 1: Query Both Storage Backends (Required for Dual Storage)**
 ```python
 async def get_job_progress_unified(job_id: str, user_id: str):
-    """Query BOTH storage backends - one for demo, one for production"""
-    
-    # Try Supabase first (production users)
-    try:
-        job = await job_storage.get_job(job_id)
-        if job and job.get("user_id") == user_id:
-            return job
-    except Exception:
-        pass
-    
-    # Fallback to in-memory (demo users, or if Supabase fails)
-    if job_id in jobs_db and jobs_db[job_id].get("user_id") == user_id:
-        return jobs_db[job_id]
-    
-    return None
+ """Query BOTH storage backends - one for demo, one for production"""
+ 
+ # Try Supabase first (production users)
+ try:
+ job = await job_storage.get_job(job_id)
+ if job and job.get("user_id") == user_id:
+ return job
+ except Exception:
+ pass
+ 
+ # Fallback to in-memory (demo users, or if Supabase fails)
+ if job_id in jobs_db and jobs_db[job_id].get("user_id") == user_id:
+ return jobs_db[job_id]
+ 
+ return None
 ```
 
 **Hint 2: Add PID Lock to Prevent Port Conflicts**
@@ -760,17 +761,17 @@ import os
 PID_FILE = "uvicorn.pid"
 
 def check_pid_lock():
-    if os.path.exists(PID_FILE):
-        with open(PID_FILE, 'r') as f:
-            old_pid = int(f.read())
-            try:
-                os.kill(old_pid, 0)
-                print(f"Process {old_pid} already running")
-                exit(1)
-            except OSError:
-                pass
-    with open(PID_FILE, 'w') as f:
-        f.write(str(os.getpid()))
+ if os.path.exists(PID_FILE):
+ with open(PID_FILE, 'r') as f:
+ old_pid = int(f.read())
+ try:
+ os.kill(old_pid, 0)
+ print(f"Process {old_pid} already running")
+ exit(1)
+ except OSError:
+ pass
+ with open(PID_FILE, 'w') as f:
+ f.write(str(os.getpid()))
 check_pid_lock()
 ```
 
@@ -778,24 +779,24 @@ check_pid_lock()
 ```python
 @app.get("/api/progress/{job_id}")
 async def get_job_progress(job_id: str, current_user = Depends(get_current_user)):
-    # Query both storage backends
-    job = await get_job_progress_unified(job_id, current_user.id)
-    
-    if not job:
-        raise HTTPException(404, "Job not found")
-    
-    return Response(
-        content=json.dumps({
-            "progress": job.get("progress", 0),
-            "status": job.get("status", "unknown"),
-            "message": job.get("message", "")
-        }),
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
-    )
+ # Query both storage backends
+ job = await get_job_progress_unified(job_id, current_user.id)
+ 
+ if not job:
+ raise HTTPException(404, "Job not found")
+ 
+ return Response(
+ content=json.dumps({
+ "progress": job.get("progress", 0),
+ "status": job.get("status", "unknown"),
+ "message": job.get("message", "")
+ }),
+ headers={
+ "Cache-Control": "no-cache, no-store, must-revalidate",
+ "Pragma": "no-cache",
+ "Expires": "0"
+ }
+ )
 ```
 
 **Hint 4: Use Server-Sent Events (Recommended for Real-Time)**
@@ -805,50 +806,50 @@ from sse_starlette.sse import EventSourceResponse
 
 @app.get("/api/progress/stream/{job_id}")
 async def progress_stream(request: Request, job_id: str, current_user = Depends(get_current_user)):
-    async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
-            
-            # Query both storage backends
-            job = await get_job_progress_unified(job_id, current_user.id)
-            
-            if job:
-                yield {
-                    "event": "progress",
-                    "data": json.dumps({
-                        "progress": job.get("progress", 0),
-                        "status": job.get("status", "unknown"),
-                        "message": job.get("message", "")
-                    })
-                }
-            
-            if not job or job.get("status") in ["completed", "failed"]:
-                break
-            
-            await asyncio.sleep(1)
-    
-    return EventSourceResponse(event_generator())
+ async def event_generator():
+ while True:
+ if await request.is_disconnected():
+ break
+ 
+ # Query both storage backends
+ job = await get_job_progress_unified(job_id, current_user.id)
+ 
+ if job:
+ yield {
+ "event": "progress",
+ "data": json.dumps({
+ "progress": job.get("progress", 0),
+ "status": job.get("status", "unknown"),
+ "message": job.get("message", "")
+ })
+ }
+ 
+ if not job or job.get("status") in ["completed", "failed"]:
+ break
+ 
+ await asyncio.sleep(1)
+ 
+ return EventSourceResponse(event_generator())
 ```
 
 **Hint 5: Always Write to Both Storage Backends**
 ```python
 async def update_job_progress(job_id: str, progress: int, message: str):
-    """Update BOTH storage backends for consistent reads"""
-    
-    # Update in-memory (demo mode)
-    if job_id in jobs_db:
-        jobs_db[job_id].update({
-            "progress": progress,
-            "message": message,
-            "status": "processing"
-        })
-    
-    # Update Supabase (production mode)
-    try:
-        await job_storage.update_progress(job_id, progress, message)
-    except Exception:
-        pass  # Demo mode or Supabase unavailable
+ """Update BOTH storage backends for consistent reads"""
+ 
+ # Update in-memory (demo mode)
+ if job_id in jobs_db:
+ jobs_db[job_id].update({
+ "progress": progress,
+ "message": message,
+ "status": "processing"
+ })
+ 
+ # Update Supabase (production mode)
+ try:
+ await job_storage.update_progress(job_id, progress, message)
+ except Exception:
+ pass # Demo mode or Supabase unavailable
 ```
 
 **Hint 6: Debug Progress Issues**
@@ -898,7 +899,7 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -1006,11 +1007,11 @@ docker version
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions from the community! Octavia is designed to be contributor-friendly with multiple entry points.
 
-### 🚀 Quick Start for Contributors
+### Quick Start for Contributors
 
 1. **Fork & Clone** the repository
 2. **Test locally**: `cd backend && DEMO_MODE=true python cli.py test-integration`
@@ -1018,14 +1019,14 @@ We welcome contributions from the community! Octavia is designed to be contribut
 4. **Make changes** and test with the CLI
 5. **Submit a PR** with a clear description
 
-### 📋 Contribution Guidelines
+### Contribution Guidelines
 
 - **Code Style**: Use Black for Python, ESLint for JavaScript
 - **Testing**: All changes must pass CLI integration tests
 - **Documentation**: Update README for new features
 - **Commits**: Use clear, descriptive commit messages
 
-### 🐛 Finding Good First Issues
+### Finding Good First Issues
 
 **Current Priority Issues:**
 1. **Frontend Progress Tracker** - Smooth out UI updates
@@ -1038,7 +1039,7 @@ We welcome contributions from the community! Octavia is designed to be contribut
 - Look for `TODO` comments in the codebase
 - Test the CLI and report any friction points
 
-### 🧪 Testing Your Changes
+### Testing Your Changes
 
 ```bash
 # Backend tests
@@ -1049,10 +1050,10 @@ python -m pytest tests/ -v
 python cli.py test-integration --input your-test-video.mp4
 
 # Full pipeline test
-python cli.py test-integration  # Uses default video
+python cli.py test-integration # Uses default video
 ```
 
-### 📚 Development Workflow
+### Development Workflow
 
 **Backend Development:**
 ```bash
@@ -1066,7 +1067,7 @@ DEMO_MODE=true python -m uvicorn app:app --reload
 ```bash
 cd octavia-web
 npm install
-npm run dev  # Hot reload enabled
+npm run dev # Hot reload enabled
 # Make UI changes, test in browser
 ```
 
@@ -1077,7 +1078,7 @@ docker-compose up --build
 # Both services run with hot reload
 ```
 
-### 💡 Contribution Ideas
+### Contribution Ideas
 
 - **Improve CLI**: Add new commands or better error handling
 - **Add Tests**: Unit tests for modules or integration tests
@@ -1086,13 +1087,13 @@ docker-compose up --build
 - **UI/UX**: Improve frontend components or add new features
 - **Languages**: Add support for new languages or voices
 
-### 📞 Getting Help
+### Getting Help
 
 - **GitHub Discussions**: For questions and ideas
 - **Issues**: Bug reports and feature requests
 - **Email**: opensource@lunartech.ai for private questions
 
-### 🌟 Why Contribute to Octavia?
+### Why Contribute to Octavia?
 
 - **Real AI Impact**: Work on production-ready AI translation systems
 - **Modern Tech Stack**: FastAPI, Next.js, advanced ML models
@@ -1102,7 +1103,7 @@ docker-compose up --build
 
 ---
 
-## ❓ Contributor FAQ
+## Contributor FAQ
 
 ### **Q: Do I need both Python AND Node.js to contribute?**
 **A:** No! Choose based on what you want to work on:
@@ -1147,7 +1148,7 @@ docker-compose up --build
 
 ---
 
-## 📄 License & Credits
+## License & Credits
 
 ### License
 This project is open source and available under the **MIT License**.
@@ -1161,20 +1162,20 @@ This project is open source and available under the **MIT License**.
 
 ---
 
-## 🌐 Connect with LunarTech
+## Connect with LunarTech
 
-*   **Website:** [lunartech.ai](http://lunartech.ai/)
-*   **LinkedIn:** [LunarTech AI](https://www.linkedin.com/company/lunartechai)
-*   **Instagram:** [@lunartech.ai](https://www.instagram.com/lunartech.ai/)
-*   **Substack:** [LunarTech on Substack](https://substack.com/@lunartech)
+* **Website:** [lunartech.ai](http://lunartech.ai/)
+* **LinkedIn:** [LunarTech AI](https://www.linkedin.com/company/lunartechai)
+* **Instagram:** [@lunartech.ai](https://www.instagram.com/lunartech.ai/)
+* **Substack:** [LunarTech on Substack](https://substack.com/@lunartech)
 
-## 📧 Contact
+## Contact
 
-*   **Tatev:** [tatev@lunartech.ai](mailto:tatev@lunartech.ai)
-*   **Vahe:** [vahe@lunartech.ai](mailto:vahe@lunartech.ai)
-*   **Open Source:** [opensource@lunartech.ai](mailto:opensource@lunartech.ai)
+* **Tatev:** [tatev@lunartech.ai](mailto:tatev@lunartech.ai)
+* **Vahe:** [vahe@lunartech.ai](mailto:vahe@lunartech.ai)
+* **Open Source:** [opensource@lunartech.ai](mailto:opensource@lunartech.ai)
 
-## 🎯 Key Differentiators
+## Key Differentiators
 
 **Octavia** stands out with:
 - **Perfect Synchronization**: Frame-accurate video playback and audio sync.
